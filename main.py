@@ -60,7 +60,12 @@ def main(
         num_workers = num_workers
     )
 
-    device = torch.device('cuda:0' if (torch.cuda.is_available()) else 'cpu')
+    # Hotfix - if the Runtime error raises, CUDA alloc on Google Colab wasn't possible
+    # TODO: need to check if a better solution is available
+    try:
+        device = torch.device('cuda:0' if (torch.cuda.is_available()) else 'cpu')
+    except RuntimeError:
+        device = torch.device('cpu')
 
     if algo == 'glow':
         model = fnn.Glow(
