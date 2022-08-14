@@ -11,7 +11,10 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
-tensors/
+datasets/**
+!datasets/README.md
+checkpoints/
+states/
 output/
 develop-eggs/
 dist/

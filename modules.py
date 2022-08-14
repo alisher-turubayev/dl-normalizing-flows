@@ -14,38 +14,12 @@ from utils import (
     gaussian_likelihood    
 )
 
-class LinearZeros(nn.Module):
-    def __init__(self, in_channels, out_channels, logscale_factor=3):
-        super().__init__()
-
-        self.linear = nn.Linear(in_channels, out_channels)
-        self.linear.weight.data.zero_()
-        self.linear.bias.data.zero_()
-
-        self.logscale_factor = logscale_factor
-
-        self.logs = nn.Parameter(torch.zeros(out_channels))
-        self.debug_size = False
-
-    def forward(self, input):
-        if not self.debug_size:
-            self.debug_size = True
-            print('LinearZeros layer input shape - {0}'.format(input.shape))
-
-        output = self.linear(input)
-        return output * torch.exp(self.logs * self.logscale_factor)
-
 class SqueezeLayer(nn.Module):
     def __init__(self, factor):
         super().__init__()
         self.factor = factor
-        self.debug_size = False
 
     def forward(self, input, logdet=None, reverse=False):
-        if not self.debug_size:
-            self.debug_size = True
-            print('Squeeze layer input shape - {0}'.format(input.shape))
-
         if reverse:
             output = unsqueeze2d(input, self.factor)
         else:
@@ -57,16 +31,12 @@ class Split2d(nn.Module):
     def __init__(self, num_channels):
         super().__init__()
         self.conv = Conv2dZeros(num_channels // 2, num_channels)
-        self.debug_size = False
 
     def split2d_prior(self, z):
         h = self.conv(z)
         return split_cross_feature(h, "cross")
 
     def forward(self, input, logdet=0.0, reverse=False, temperature=None):
-        if not self.debug_size:
-            self.debug_size = True
-            print('Split2 layer input shape - {0}'.format(input.shape))
         if reverse:
             z1 = input
             mean, logs = self.split2d_prior(z1)
@@ -90,7 +60,6 @@ class ActNorm(nn.Module):
         self.logs = nn.Parameter(torch.zeros(*size))
         self.num_features = num_features
         self.inited = False
-        self.debug_size = False
 
     def initialize_parameters(self, input):
         if not self.training:
@@ -109,10 +78,6 @@ class ActNorm(nn.Module):
     def forward(self, input, logdet = None, reverse = False):
         if not self.inited:
             self.initialize_parameters(input)
-
-        if not self.debug_size:
-            self.debug_size = True
-            print('ActNorm layer input shape - {0}'.format(input.shape))
 
         if not reverse:
             input = input + self.bias
@@ -153,8 +118,7 @@ class InvConv1x1(nn.Module):
         self.l_mask = l_mask
         self.eye = eye
         self.w_shape = w_shape
-        self.debug_size = False
-
+ 
     def get_weight(self, input, reverse):
         _, _, h, w = input.shape
 
@@ -180,13 +144,6 @@ class InvConv1x1(nn.Module):
         return weight.view(self.w_shape[0], self.w_shape[1], 1, 1).to(input.device), dlogdet.to(input.device)
 
     def forward(self, input, logdet=None, reverse=False):
-        """
-        log-det = log|abs(|W|)| * pixels
-        """
-        if not self.debug_size:
-            self.debug_size = True
-            print('InvConv1x1 layer input shape - {0}'.format(input.shape))
-
         weight, dlogdet = self.get_weight(input, reverse)
 
         if not reverse:
@@ -246,13 +203,8 @@ class Conv2d(nn.Module):
             self.actnorm = ActNorm(out_channels)
 
         self.do_actnorm = do_actnorm
-        self.debug_size = False
 
     def forward(self, input):
-        if not self.debug_size:
-            self.debug_size = True
-            print('Conv2d layer input shape - {0}'.format(input.shape))
-
         x = self.conv(input)
         if self.do_actnorm:
             x, _ = self.actnorm(x)
@@ -282,11 +234,7 @@ class Conv2dZeros(nn.Module):
 
         self.logscale_factor = logscale_factor
         self.logs = nn.Parameter(torch.zeros(out_channels, 1, 1))
-        self.debug_size = False
 
     def forward(self, input):
-        if not self.debug_size:
-            self.debug_size = True
-            print('Conv2dZeros layer input shape - {0}'.format(input.shape))
         output = self.conv(input)
         return output * torch.exp(self.logs * self.logscale_factor)

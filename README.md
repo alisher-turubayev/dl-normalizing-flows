@@ -8,8 +8,11 @@ This is the GitHub repository for the code part of the Deep Learning final proje
 [Kaggle - Anime Faces Dataset](https://www.kaggle.com/datasets/splcher/animefacedataset)
 
 **Code references and used repositories:**
+
 [Glow implementation on Pytorch by Joost van Amersfoort (@y0ast) & Caleb Carr (@calebmcarr)](https://github.com/y0ast/Glow-PyTorch)
+
 [Implementation of selected normalizing flows on PyTorch by Ilya Kostrikov (@ikostrikov)](https://github.com/ikostrikov/pytorch-flows)
+
 *Additional references will be added as needed*
 
 ## Results

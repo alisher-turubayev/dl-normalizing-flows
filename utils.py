@@ -71,3 +71,13 @@ def gaussian_sample(mean, logs, temperature=1):
 def gaussian_likelihood(mean, logs, x):
     p = gaussian_p(mean, logs, x)
     return torch.sum(p, dim=[1, 2, 3])
+
+def compute_loss(nll, reduction="mean"):
+    if reduction == "mean":
+        losses = {"nll": torch.mean(nll)}
+    elif reduction == "none":
+        losses = {"nll": nll}
+
+    losses["total_loss"] = losses["nll"]
+
+    return losses

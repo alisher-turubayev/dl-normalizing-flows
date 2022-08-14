@@ -13,7 +13,6 @@ from modules import (
     InvConv1x1,
     affine_coupling,
     Conv2dZeros,
-    LinearZeros
 )
 
 from utils import (
@@ -149,17 +148,14 @@ class FlowNet(nn.Module):
                 z, _ = layer(z, logdet=0, reverse=True)
         return z
 
-
 class Glow(nn.Module):
     def __init__(
         self,
-        image_shape = (64, 64, 3),
-        hidden_channels = 512,
-        K = 32,
-        L = 3,
+        image_shape,
+        hidden_channels,
+        K,
+        L,
         learn_top = True,
-        y_classes = 0,
-        y_condition = False,
     ):
         super().__init__()
         self.flow = FlowNet(
@@ -170,20 +166,10 @@ class Glow(nn.Module):
         )
         self.learn_top = learn_top
 
-        self.y_classes = y_classes
-        self.y_condition = y_condition
-
-        self.learn_top = learn_top
-
         # learned prior
         if learn_top:
             C = self.flow.output_shapes[-1][1]
             self.learn_top_fn = Conv2dZeros(C * 2, C * 2)
-
-        if y_condition:
-            C = self.flow.output_shapes[-1][1]
-            self.project_ycond = LinearZeros(y_classes, 2 * C)
-            self.project_class = LinearZeros(C, y_classes)
 
         self.register_buffer(
             "prior_h",
@@ -197,55 +183,42 @@ class Glow(nn.Module):
             ),
         )
 
-    def prior(self, data, y_onehot=None):
+    def prior(self, data):
         if data is not None:
             h = self.prior_h.repeat(data.shape[0], 1, 1, 1)
         else:
-            # Hardcoded a batch size of 32 here
-            h = self.prior_h.repeat(32, 1, 1, 1)
-
-        channels = h.size(1)
+            h = self.prior_h.repeat(100, 1, 1, 1)
 
         if self.learn_top:
             h = self.learn_top_fn(h)
 
-        if self.y_condition:
-            assert y_onehot is not None
-            yp = self.project_ycond(y_onehot)
-            h += yp.view(h.shape[0], channels, 1, 1)
-
         return split_cross_feature(h, "split")
 
-    def forward(self, x=None, y_onehot=None, z=None, temperature=None, reverse=False):
+    def forward(self, x=None, z=None, temperature=None, reverse=False):
         if reverse:
-            return self.reverse_flow(z, y_onehot, temperature)
+            return self.reverse_flow(z, temperature)
         else:
-            return self.normal_flow(x, y_onehot)
+            return self.normal_flow(x)
 
-    def normal_flow(self, x, y_onehot):
+    def normal_flow(self, x):
         b, c, h, w = x.shape
 
         x, logdet = uniform_binning_correction(x)
 
         z, objective = self.flow(x, logdet=logdet, reverse=False)
 
-        mean, logs = self.prior(x, y_onehot)
+        mean, logs = self.prior(x)
         objective += gaussian_likelihood(mean, logs, z)
-
-        if self.y_condition:
-            y_logits = self.project_class(z.mean(2).mean(2))
-        else:
-            y_logits = None
-
+       
         # Full objective - converted to bits per dimension
         bpd = (-objective) / (math.log(2.0) * c * h * w)
 
-        return z, bpd, y_logits
+        return z, bpd
 
-    def reverse_flow(self, z, y_onehot, temperature):
+    def reverse_flow(self, z, temperature):
         with torch.no_grad():
             if z is None:
-                mean, logs = self.prior(z, y_onehot)
+                mean, logs = self.prior(z)
                 z = gaussian_sample(mean, logs, temperature)
             x = self.flow(z, temperature=temperature, reverse=True)
         return x

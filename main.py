@@ -1,71 +1,59 @@
 # File is a mish-mash from https://github.com/ikostrikov/pytorch-flows/,
 #   https://github.com/y0ast/Glow-PyTorch/ and https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
 # 
-# TODO: rewrite to 
-#   1. normalize inputs, 
-#   2. split the dataset into test/validation datasets 
-#   3. log-error
-#   4. select best performing model after N epochs and use it to generate images
+# TODO: rewrite 
 
 import torch
 import torch.optim as optim
-import torch.utils.data
+import torch.utils.data as torchdata
 
 import torchvision
 import torchvision.transforms as transforms
-import torchvision.datasets as dset
+from torchvision.datasets import ImageFolder
 
 from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from ignite.handlers import ModelCheckpoint, Timer
-from ignite.metrics import RunningAverage, Loss
+from ignite.metrics import RunningAverage
 
-from itertools import islice
-
-from tqdm import tqdm
 import argparse
 
 import flows as fnn
+from utils import compute_loss
 
 import os
 
-def test_mode():
-    current_path = os.path.dirname(os.path.abspath(__file__))
-    # Epochs to train - just for testing purposes, the value is set to 100
-    epochs = 100
-    # Limited mode - by default, the algorithms are run with simple architectures to allow for easier testing
-    limited_mode = True
-    # Set the manual seed to 100 for reproducibility (this is a testing method)
-    torch.manual_seed(100)
-    # Set default parameters
-    datapath = current_path + '/datasets/initial-tests'
-    # Dimension to resize the input images to (because images are squarified, one side is sufficient)
-    image_size = 64
-    # Batch size - set to 64 by default
-    batch_size = 64
-    # Learning rate
-    lr = 5e-4
-    # Weight decay
-    weight_decay = 5e-5
-    # Number of workers for the DataLoader
-    num_workers = 2
-    # Warmup
-    warmup = 5
-    # Output directory for model checkpoints
-    output_dir = current_path + '/checkpoints'
-    
+def main(
+    algo,
+    epochs,
+    K,
+    L,
+    num_hidden,
+    lr,
+    weight_decay,
+    warmup,
+    dataset_name,
+    datapath,
+    batch_size,
+    image_size,
+    channels,
+    num_workers,
+    output_dir,
+    fresh,
+    ):
     # Use ImageFolder dataset class
-    dataset = dset.ImageFolder(root = datapath, 
-        transform=transforms.Compose([
-            transforms.Resize(image_size), 
-            transforms.CenterCrop(image_size), 
-            transforms.ToTensor()
-        ])
+    dataset = ImageFolder(
+        root = datapath + '/' + dataset_name, 
+        transform = transforms.Compose(
+            [
+                transforms.Resize((image_size, image_size)), 
+                transforms.CenterCrop(image_size), 
+                transforms.ToTensor(),
+            ]
+        )
     )
 
-    # Since the dataset is small (~5 MBs), the dataloader is set to single-processing mode
-    # https://pytorch.org/docs/stable/data.html
-    dataloader = torch.utils.data.DataLoader(
+    dataloader = torchdata.DataLoader(
         dataset, 
         batch_size = batch_size, 
         shuffle = True, 
@@ -74,91 +62,73 @@ def test_mode():
 
     device = torch.device('cuda:0' if (torch.cuda.is_available()) else 'cpu')
 
-    # Limited mode check - otherwise, sitting here waiting is torture
-    k = 5 
-    l = 1
-    if not limited_mode:
-        k = 32
-        l = 3
-
-    model = fnn.Glow(K = k, L = l)
+    if algo == 'glow':
+        model = fnn.Glow(
+            (image_size, image_size, channels),
+            num_hidden,
+            K = K, 
+            L = L,
+            )
+    elif algo == 'realnvp':
+        print('Currently no implementation of RealNVP is available. :c')
+        return
+    else:
+        print('Currently no implementation of StyleGAN is available. :c')
+        return
+    
     model = model.to(device)
 
     optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
     lr_lambda = lambda epoch: min(1.0, (epoch + 1) / warmup)  # noqa
 
-    train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh = True)
+    train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh)
 
     try:
         os.makedirs('states')
     except OSError:
         pass
-    torch.save(model.state_dict(), current_path + '/states/state_test.pt')
-    torch.save(optimizer.state_dict(), current_path + '/states/state_optim_test.pt')
+
+    torch.save(model.state_dict(), work_dir + '/states/' + algo + '_state.pt')
+    torch.save(optimizer.state_dict(), work_dir + '/states/' + algo + '_state_optim.pt')
 
     with torch.no_grad():
         imgs = model.sample(temperature = 0.1).detach().cpu()
 
         try:
-            os.makedirs('images')
+            os.makedirs('output')
         except OSError:
             pass
 
-        torchvision.utils.save_image(imgs, 'images/img_test.png', nrows = 4)
+        torchvision.utils.save_image(imgs, 'output/img_' + algo + '.png', nrows = 10)
+    return
 
-def compute_loss(nll, reduction="mean"):
-    if reduction == "mean":
-        losses = {"nll": torch.mean(nll)}
-    elif reduction == "none":
-        losses = {"nll": nll}
-
-    losses["total_loss"] = losses["nll"]
-
-    return losses
-
-def train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh):
-    """model.train()
-
-    pbar = tqdm(total = len(dataloader.dataset))
-    for _, data in enumerate(dataloader):
-        if isinstance(data, list):
-            data = data[0]
-
-        data = data.to(device)
-        optimizer.zero_grad()
-        model(data)
-        optimizer.step()
-        pbar.update(data.size(0))
-
-    pbar.close() """
-
+def train(
+    epochs, 
+    device, 
+    model, 
+    dataloader, 
+    optimizer, 
+    lr_lambda, 
+    output_dir, 
+    fresh = True,
+    saved_model = None, 
+    saved_optimizer = None
+    ):
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     def step(engine, batch):
         model.train()
         optimizer.zero_grad()
 
-        x, y = batch
+        x, _ = batch
         x = x.to(device)
 
-        z, nll, y_logits = model(x, None)
+        _, nll = model(x)
         losses = compute_loss(nll)
 
         losses["total_loss"].backward()
 
         optimizer.step()
-
-        return losses
-
-    def eval_step(engine, batch):
-        model.eval()
-
-        x, y = batch
-        x = x.to(device)
-
-        with torch.no_grad():
-            _, nll, _ = model(x, None)
-            losses = compute_loss(nll, reduction="none")
 
         return losses
 
@@ -178,20 +148,9 @@ def train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, f
         trainer, "total_loss"
     )
 
-    evaluator = Engine(eval_step)
-
-    Loss(
-        lambda x, y: torch.mean(x),
-        output_transform=lambda x: (
-            x["total_loss"],
-            torch.empty(x["total_loss"].shape[0]),
-        ),
-    ).attach(evaluator, "total_loss")
-
     pbar = ProgressBar()
     pbar.attach(trainer, metric_names=monitoring_metrics)
 
-    """# load pre-trained model if given
     if not fresh:
         model.load_state_dict(torch.load(saved_model))
         model.set_actnorm_init()
@@ -205,39 +164,11 @@ def train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, f
         @trainer.on(Events.STARTED)
         def resume_training(engine):
             engine.state.epoch = resume_epoch
-            engine.state.iteration = resume_epoch * len(engine.state.dataloader) """
+            engine.state.iteration = resume_epoch * len(engine.state.dataloader)
 
     @trainer.on(Events.STARTED)
     def init(engine):
         model.train()
-
-        """ init_batches = []
-        init_targets = []
-
-        with torch.no_grad():
-            for batch, target in islice(dataloader, None, 8):
-                init_batches.append(batch)
-                init_targets.append(target)
-
-            init_batches = torch.cat(init_batches).to(device)
-
-            print(init_batches.shape)
-            assert init_batches.shape[0] == 64
-
-            init_targets = None
-
-            model(init_batches, init_targets) """
-
-    #@trainer.on(Events.EPOCH_COMPLETED)
-    """ def evaluate(engine):
-        evaluator.run(test_loader)
-
-        scheduler.step()
-        metrics = evaluator.state.metrics
-
-        losses = ", ".join([f"{key}: {value:.2f}" for key, value in metrics.items()])
-
-        print(f"Validation Results - Epoch: {engine.state.epoch} {losses}") """
 
     timer = Timer(average=True)
     timer.attach(
@@ -257,27 +188,112 @@ def train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, f
 
     trainer.run(dataloader, epochs)
 
-def main(dataset, algo, is_fresh_start):
-    print('Yay, I worked!')
-    return
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description = 'Normalizing Flows PyTorch Implementation.')
+    # Get the current directory path
+    work_dir = os.path.dirname(os.path.abspath(__file__))
 
-    parser.add_argument(
-        '--dataset', 
-        type = str, 
-        default = 'kaggle-sample', 
-        choices = ['kaggle-sample', 'kaggle-full'], 
-        help = 'The dataset to be used. Datasets kaggle-sample and kaggle-full were used for testing purposes, but can be utilized for training/evaluation.'
-    )
+    parser = argparse.ArgumentParser(description = 'Utilizing Normalizing Flows for Anime Face Generation - Main Program')
 
     parser.add_argument(
         '--algo',
         type = str,
         default = 'glow',
         choices = ['glow', 'realnvp', 'style-gan'],
-        help = 'The type of algorithm to train.'
+        help = 'The type of algorithm to train. Default is Glow.'
+    )
+
+    parser.add_argument(
+        '--epochs',
+        type = int,
+        default = 500,
+        help = 'The number of epochs to train the model. Default is 500.'
+    )
+
+    parser.add_argument(
+        '--blocks-per-level',
+        type = int,
+        dest = 'K',
+        default = 32,
+        help = 'The number of blocks per each level in a Glow model. By default is set to 32. Ignored when \'--algo\' argument is \'realnvp\' or \'style-gan\'.'
+    )
+
+    parser.add_argument(
+        '--levels',
+        type = int,
+        dest = 'L',
+        default = 3,
+        help = 'The number of levels in a Glow model. Ignored when \'--algo\' argument is \'realnvp\' or \'style-gan\'.'
+    )
+
+    parser.add_argument(
+        '--num-hidden',
+        type = int,
+        default = 512,
+        help = 'Number of hidden channels in the ActNorm layer (used for convolutions within the layer as in the Glow paper). Default is 512. Ignored when \'--algo\' argument is \'real-nvp\' or \'style-gan\'.'
+    )
+
+    parser.add_argument(
+        '--learning-rate',
+        type = float,
+        dest = 'lr',
+        default = 5e-4,
+        help = 'Learning rate for the model. By default 5e-4 or 0.0005.'
+    )
+
+    parser.add_argument(
+        '--weight-decay',
+        type = float,
+        default = 5e-5,
+        help = 'Weight decay for the model. By default 5e-5 or 0.00005.'
+    )
+
+    parser.add_argument(
+        '--warmup',
+        type = int,
+        default = 5,
+        help = 'Warmup learning rate. By default 5.'
+    )
+
+    parser.add_argument(
+        '--dataset-name', 
+        type = str, 
+        default = 'kaggle-full',  
+        help = 'The dataset to be used. By default, \'Anime Faces Dataset\' from Kaggle is used. Custom datasets can be unzipped into \'datasets\' folder - see \'datasets/README.md\' for instructions.'
+    )
+
+    parser.add_argument(
+        '--datapath',
+        type = str,
+        default = work_dir + '/datasets',
+        help = 'The path to the dataset. By default, *current working directory*/\'datasets\' is used. Custom datasets can be unzipped into \'datasets\' folder - see \'datasets/README.md\' for instructions.'
+    )
+
+    parser.add_argument(
+        '--batch-size',
+        type = int,
+        default = 64,
+        help = 'The batch size used during training. By default 64.'
+    )
+
+    parser.add_argument(
+        '--image-size',
+        type = int,
+        default = 64,
+        help = 'Image size of each image. By default, set to 64 (meaning that images are square and 64x64 in dimensions).'
+    )
+
+    parser.add_argument(
+        '--channels',
+        type = int,
+        default = 3,
+        help = 'Number of channels in each image. By default, 3 (for RGB).'
+    )
+
+    parser.add_argument(
+        '--num-workers',
+        type = int,
+        default = 2,
+        help = 'Number of workers in the Dataloader. Default is 2.'
     )
 
     parser.add_argument(
@@ -288,18 +304,12 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--test',
-        action = argparse.BooleanOptionalAction,
-        default = False,
-        help = 'Should the program run in test mode - defaults to false. In test mode, \'kaggle-sample\' dataset is used (378 images), all three models are trained, seed is manually set, and hyperparameters are reduced to minimal values (this mode is useful for debugging).'
+        '--output-dir',
+        type = str,
+        default = work_dir + '/checkpoints',
+        help = 'Output directory for the checkpoint information. Default is *current working directory*/\'checkpoints\''
     )
 
-    args = parser.parse_args()
+    args = vars(parser.parse_args())
 
-    if args.test:
-        test_mode()
-    else:
-        kwargs = vars(args)
-        del kwargs['test']
-
-        main(**kwargs)
+    main(**args)
