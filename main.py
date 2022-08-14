@@ -298,7 +298,7 @@ if __name__ == "__main__":
 
     parser.add_argument(
         '--fresh',
-        action = argparse.BooleanOptionalAction,
+        type = bool,
         default = True,
         help = 'Should the model be trained from the scratch - defaults to true. Only change this if you have trained a model before (all trained models are stored in \'states\' directory).'
     )
