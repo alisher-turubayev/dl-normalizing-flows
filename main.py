@@ -40,7 +40,12 @@ def main(
     num_workers,
     output_dir,
     fresh,
+    fixed
     ):
+    # If the fixed mode is requested, set the seed to 999 for reproducibility
+    if fixed:
+        torch.manual_seed(999)
+
     # Use ImageFolder dataset class
     dataset = ImageFolder(
         root = datapath + '/' + dataset_name, 
@@ -53,8 +58,15 @@ def main(
         )
     )
 
+    # Because using the original dataset, even after prunning to ~47k images takes too much,
+    # we take a random split of 100 batches
+
+    subset = None
+    if len(dataset) > batch_size * 100:
+        subset, _ = torchdata.random_split(dataset, [batch_size * 100, len(dataset) - (batch_size * 100)])
+
     dataloader = torchdata.DataLoader(
-        dataset, 
+        subset if (subset is not None) else dataset, 
         batch_size = batch_size, 
         shuffle = True, 
         num_workers = num_workers
@@ -302,6 +314,13 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
+        '--output-dir',
+        type = str,
+        default = work_dir + '/checkpoints',
+        help = 'Output directory for the checkpoint information. Default is *current working directory*/\'checkpoints\''
+    )
+
+    parser.add_argument(
         '--fresh',
         type = bool,
         default = True,
@@ -309,10 +328,10 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--output-dir',
-        type = str,
-        default = work_dir + '/checkpoints',
-        help = 'Output directory for the checkpoint information. Default is *current working directory*/\'checkpoints\''
+        '--fixed',
+        type = bool,
+        default = True,
+        help = 'Should the seed be fixed for reproducibility - defaults to true and is set to 999.'
     )
 
     args = vars(parser.parse_args())
