@@ -101,7 +101,7 @@ def main(
     train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh)
 
     try:
-        os.makedirs(work_dir + 'states')
+        os.makedirs(os.path.join(work_dir, 'states'))
     except OSError:
         pass
 
@@ -112,11 +112,11 @@ def main(
         imgs = model.sample(temperature = 0.1).detach().cpu()
 
         try:
-            os.makedirs(work_dir + 'output')
+            os.makedirs(os.path.join(work_dir, 'output'))
         except OSError:
             pass
 
-        torchvision.utils.save_image(imgs, work_dir + 'output/img_' + algo + '.png', nrows = 10)
+        torchvision.utils.save_image(imgs, work_dir + '/output/img_' + algo + '.png', nrows = 10)
     return
 
 def train(
