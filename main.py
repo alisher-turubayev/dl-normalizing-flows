@@ -48,6 +48,26 @@ def main(
     if fixed:
         torch.manual_seed(999)
 
+    # If the output directory is not specified, make it working directory
+    if output_dir is None:
+        output_dir = os.path.join(work_dir, 'outputs')
+
+    # Create all required directories if needed
+    try:
+        os.makedirs(os.path.join(output_dir, 'states'))
+    except OSError:
+        pass
+
+    try: 
+        os.makedirs(os.path.join(output_dir, 'gen'))
+    except OSError:
+        pass
+
+    try:
+        os.makedirs(os.path.join(output_dir, 'checkpoints'))
+    except OSError:
+        pass
+
     # Use ImageFolder dataset class
     dataset = ImageFolder(
         root = datapath + '/' + dataset_name, 
@@ -102,25 +122,15 @@ def main(
 
     train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh, saved_model, saved_optimizer)
 
-    try:
-        os.makedirs(os.path.join(work_dir, 'states'))
-    except OSError:
-        pass
-
-    torch.save(model.state_dict(), work_dir + '/states/' + algo + '_state.pt')
-    torch.save(optimizer.state_dict(), work_dir + '/states/' + algo + '_state_optim.pt')
+    torch.save(model.state_dict(), output_dir + '/states/' + algo + '_state.pt')
+    torch.save(optimizer.state_dict(), output_dir + '/states/' + algo + '_state_optim.pt')
 
     with torch.no_grad():
         imgs = []
         for i in range(0, 101):
             imgs += model.sample(temperature = i / 100).detach().cpu()
 
-        try:
-            os.makedirs(os.path.join(work_dir, 'output'))
-        except OSError:
-            pass
-
-        torchvision.utils.save_image(imgs, work_dir + '/output/img_' + algo + '.png', nrows = 10)
+        torchvision.utils.save_image(imgs, output_dir + '/gen/img_' + algo + '.png', nrows = 10)
     return
 
 def train(
@@ -155,7 +165,7 @@ def train(
 
     trainer = Engine(step)
     checkpoint_handler = ModelCheckpoint(
-        output_dir, "glow", n_saved=2, require_empty=False
+        os.path.join(output_dir, 'checkpoints'), "glow", n_saved=2, require_empty=False
     )
 
     trainer.add_event_handler(
@@ -185,6 +195,8 @@ def train(
         if saved_optimizer:
             optimizer.load_state_dict(torch.load(saved_optimizer))
             print('Saved optimizer file located at {} was loaded successfully.'.format(saved_optimizer))
+        else:
+            print('Optimizer not specified, new one will be used.')
 
     @trainer.on(Events.STARTED)
     def init(engine):
@@ -319,15 +331,13 @@ if __name__ == "__main__":
     parser.add_argument(
         '--output-dir',
         type = str,
-        default = work_dir + '/checkpoints',
-        help = 'Output directory for the checkpoint information. Default is *current working directory*/\'checkpoints\''
+        help = 'Output directory for all generated data (model states, checkpoints, generated data). Default is *current working directory*/\'outputs\''
     )
 
     parser.add_argument(
-        '--fresh',
-        type = bool,
-        default = True,
-        help = 'Should the model be trained from the scratch - defaults to true. Only change this if you have trained a model before (all trained models are stored in \'states\' directory).'
+        '--nofresh',
+        action = 'store_true',
+        help = 'Should the model be trained from the scratch - if you specify this argument, the model will trained further. Only change this if you have trained a model before.'
     )
 
     parser.add_argument(
@@ -343,12 +353,25 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--fixed',
-        type = bool,
-        default = True,
-        help = 'Should the seed be fixed for reproducibility - defaults to true and is set to 999.'
+        '--nofixed',
+        action = 'store_true',
+        help = 'Should the seed be fixed for reproducibility - if you specify this argument, the model will be trained with a random seed. Defaults to true and is the seed is set to 999.'
     )
 
-    args = vars(parser.parse_args())
+    args = parser.parse_args()
+    kwargs = vars(args)
 
-    main(**args)
+    if (args.nofresh):
+        kwargs['fresh'] = False
+    else:
+        kwargs['fresh'] = True
+
+    if (args.nofixed):
+        kwargs['fixed'] = False
+    else:
+        kwargs['fixed'] = True
+
+    del kwargs['nofresh']
+    del kwargs['nofixed']
+
+    main(**kwargs)

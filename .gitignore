@@ -13,9 +13,7 @@ __pycache__/
 build/
 datasets/**
 !datasets/README.md
-checkpoints/
-states/
-output/
+outputs/
 develop-eggs/
 dist/
 downloads/
