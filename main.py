@@ -40,6 +40,8 @@ def main(
     num_workers,
     output_dir,
     fresh,
+    saved_model,
+    saved_optimizer,
     fixed
     ):
     # If the fixed mode is requested, set the seed to 999 for reproducibility
@@ -98,7 +100,7 @@ def main(
     optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
     lr_lambda = lambda epoch: min(1.0, (epoch + 1) / warmup)  # noqa
 
-    train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh)
+    train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh, saved_model, saved_optimizer)
 
     try:
         os.makedirs(os.path.join(work_dir, 'states'))
@@ -109,7 +111,9 @@ def main(
     torch.save(optimizer.state_dict(), work_dir + '/states/' + algo + '_state_optim.pt')
 
     with torch.no_grad():
-        imgs = model.sample(temperature = 0.1).detach().cpu()
+        imgs = []
+        for i in range(0, 101):
+            imgs += model.sample(temperature = i / 100).detach().cpu()
 
         try:
             os.makedirs(os.path.join(work_dir, 'output'))
@@ -127,9 +131,9 @@ def train(
     optimizer, 
     lr_lambda, 
     output_dir, 
-    fresh = True,
-    saved_model = None, 
-    saved_optimizer = None
+    fresh,
+    saved_model, 
+    saved_optimizer
     ):
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -169,19 +173,18 @@ def train(
     pbar.attach(trainer, metric_names=monitoring_metrics)
 
     if not fresh:
+        if saved_model is None:
+            print('Saved model file not specified. See --help/-h for more details.')
+            return
+
         model.load_state_dict(torch.load(saved_model))
         model.set_actnorm_init()
 
+        print('Saved model file located at {} was loaded successfully.'.format(saved_model))
+
         if saved_optimizer:
             optimizer.load_state_dict(torch.load(saved_optimizer))
-
-        file_name, ext = os.path.splitext(saved_model)
-        resume_epoch = int(file_name.split("_")[-1])
-
-        @trainer.on(Events.STARTED)
-        def resume_training(engine):
-            engine.state.epoch = resume_epoch
-            engine.state.iteration = resume_epoch * len(engine.state.dataloader)
+            print('Saved optimizer file located at {} was loaded successfully.'.format(saved_optimizer))
 
     @trainer.on(Events.STARTED)
     def init(engine):
@@ -325,6 +328,18 @@ if __name__ == "__main__":
         type = bool,
         default = True,
         help = 'Should the model be trained from the scratch - defaults to true. Only change this if you have trained a model before (all trained models are stored in \'states\' directory).'
+    )
+
+    parser.add_argument(
+        '--saved-model',
+        type = str,
+        help = 'The file that contains the previously trained model. Include the path, not just the name of the model file.'
+    )
+
+    parser.add_argument(
+        '--saved-optimizer',
+        type = str,
+        help = 'The file that contains the previously trained optimizer. Include the path, not just the name of the model optimizer.'
     )
 
     parser.add_argument(

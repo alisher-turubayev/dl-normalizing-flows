@@ -187,7 +187,7 @@ class Glow(nn.Module):
         if data is not None:
             h = self.prior_h.repeat(data.shape[0], 1, 1, 1)
         else:
-            h = self.prior_h.repeat(100, 1, 1, 1)
+            h = self.prior_h.repeat(1, 1, 1, 1)
 
         if self.learn_top:
             h = self.learn_top_fn(h)
