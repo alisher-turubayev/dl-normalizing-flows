@@ -140,8 +140,9 @@ def main(
         print('Currently no implementation of GAN is available. :c')
         return
     
+    model = model.to(device)
     optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
-    
+
     if not fresh:
         if saved_model is None:
             print('Fresh mode was disabled, but the model .pt file was not specified. See -h/--help for help.')
@@ -161,8 +162,6 @@ def main(
             except Exception:
                 print('Could not load optimizer at {}, using a new one.'.format(saved_optimizer))
                 pass
-
-    model = model.to(device)
 
     scale_reg = 5e-5
 
