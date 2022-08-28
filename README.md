@@ -9,9 +9,13 @@ This is the GitHub repository for the code part of the Deep Learning final proje
 
 **Code references and used repositories:**
 
-[Glow implementation on Pytorch by Joost van Amersfoort (@y0ast) & Caleb Carr (@calebmcarr)](https://github.com/y0ast/Glow-PyTorch)
+~~[Glow implementation on Pytorch by Joost van Amersfoort (@y0ast) & Caleb Carr (@calebmcarr)](https://github.com/y0ast/Glow-PyTorch)~~
+
+*Removed due to consistent issues / concerns about implementation*
 
 [Implementation of selected normalizing flows on PyTorch by Ilya Kostrikov (@ikostrikov)](https://github.com/ikostrikov/pytorch-flows)
+
+[realNVP by Fangzhou Mu (@fmu2)](https://github.com/fmu2/realNVP)
 
 *Additional references will be added as needed*
 

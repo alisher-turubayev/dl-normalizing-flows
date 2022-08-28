@@ -1,27 +1,29 @@
-# File is a mish-mash from https://github.com/ikostrikov/pytorch-flows/,
-#   https://github.com/y0ast/Glow-PyTorch/ and https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
-# 
-# TODO: rewrite 
+# References:
+#   https://github.com/ikostrikov/pytorch-flows/,
+#   https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html,
+#   https://github.com/fmu2/realNVP
+
+import numpy as np
 
 import torch
 import torch.optim as optim
 import torch.utils.data as torchdata
+import torch.distributions as distributions
 
 import torchvision
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 
-from ignite.contrib.handlers import ProgressBar
-from ignite.engine import Engine, Events
-from ignite.handlers import ModelCheckpoint, Timer
-from ignite.metrics import RunningAverage
-
 import argparse
 
-import flows as fnn
-from utils import compute_loss
+from flow_realnvp import RealNVP
+from utils import (
+    logit_transform,
+    Hyperparameters,
+)
 
 import os
+import math
 
 def main(
     algo,
@@ -31,7 +33,6 @@ def main(
     num_hidden,
     lr,
     weight_decay,
-    warmup,
     dataset_name,
     datapath,
     batch_size,
@@ -54,6 +55,11 @@ def main(
 
     # Create all required directories if needed
     try:
+        os.makedirs(output_dir)
+    except OSError:
+        pass
+
+    try:
         os.makedirs(os.path.join(output_dir, 'states'))
     except OSError:
         pass
@@ -68,49 +74,68 @@ def main(
     except OSError:
         pass
 
+    data_transforms = transforms.Compose(
+        [
+            transforms.Resize((image_size, image_size)), 
+            transforms.CenterCrop(image_size), 
+            transforms.ToTensor(),
+        ]
+    )
+
     # Use ImageFolder dataset class
     dataset = ImageFolder(
         root = datapath + '/' + dataset_name, 
-        transform = transforms.Compose(
-            [
-                transforms.Resize((image_size, image_size)), 
-                transforms.CenterCrop(image_size), 
-                transforms.ToTensor(),
-            ]
-        )
+        transform = data_transforms
     )
 
     # Because using the original dataset, even after prunning to ~47k images takes too much,
     # we take a random split of 100 batches
-
-    subset = None
     if len(dataset) > batch_size * 100:
-        subset, _ = torchdata.random_split(dataset, [batch_size * 100, len(dataset) - (batch_size * 100)])
+        dataset, _ = torchdata.random_split(dataset, [batch_size * 100, len(dataset) - (batch_size * 100)])
 
-    dataloader = torchdata.DataLoader(
-        subset if (subset is not None) else dataset, 
+    # Split is 90% training set / 10% validation set
+    train_set_size = math.floor(len(dataset) * 0.9)
+    train_set, valid_set = torchdata.random_split(dataset, [train_set_size, len(dataset) - train_set_size])
+
+    train_loader = torchdata.DataLoader(
+        train_set,
         batch_size = batch_size, 
         shuffle = True, 
         num_workers = num_workers
     )
 
-    # Hotfix - if the Runtime error raises, CUDA alloc on Google Colab wasn't possible
-    # TODO: need to check if a better solution is available
+    valid_loader = torchdata.DataLoader(
+        valid_set,
+        batch_size = batch_size, 
+        shuffle= True,
+        num_workers = num_workers
+    )
+
     try:
         device = torch.device('cuda:0' if (torch.cuda.is_available()) else 'cpu')
     except RuntimeError:
         device = torch.device('cpu')
 
     if algo == 'glow':
-        model = fnn.Glow(
-            (image_size, image_size, channels),
-            num_hidden,
-            K = K, 
-            L = L,
-            )
-    elif algo == 'realnvp':
-        print('Currently no implementation of RealNVP is available. :c')
+        print('Currently no implementation of Glow is available. :c')
         return
+    elif algo == 'realnvp':
+        # Use normal distributions for the prior 
+        prior = distributions.Normal(torch.tensor(0.).to(device), torch.tensor(1.).to(device))
+
+        model = RealNVP(
+            channels, 
+            image_size,
+            prior,
+            Hyperparameters(
+                base_dim = 32,
+                res_blocks = 8,
+                bottleneck = True,
+                skip = True,
+                weight_norm = True,
+                coupling_bn = True
+                )
+            )
     else:
         print('Currently no implementation of StyleGAN is available. :c')
         return
@@ -118,107 +143,118 @@ def main(
     model = model.to(device)
 
     optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
-    lr_lambda = lambda epoch: min(1.0, (epoch + 1) / warmup)  # noqa
+    scale_reg = 5e-5
 
-    train(epochs, device, model, dataloader, optimizer, lr_lambda, output_dir, fresh, saved_model, saved_optimizer)
+    # Define training variables
+    curr_epoch = 0
+    optimal_logll = float('-inf')
+    early_stop = 0
+
+    while curr_epoch < epochs:
+        curr_epoch += 1
+        print('Current epoch: {}'.format(curr_epoch))
+
+        # Before training loop, flush the variables
+        running_loss_nll = 0.
+
+        # Training loop
+        model.train()
+        for batch_idx, data in enumerate(train_loader):
+            optimizer.zero_grad()
+
+            x, _ = data
+
+            if algo == 'glow':
+                pass
+            elif algo == 'realnvp':
+                # log-determinant of Jacobian from the logit transform
+                x, logdet = logit_transform(x)
+                x = x.to(device)
+                logdet = logdet.to(device)
+                logll, weight_scale = model(x)
+                logll = (logll + logdet).mean()
+                # For RealNVP, there is L2 regularization on scaling factors
+                loss = -logll + scale_reg * weight_scale
+                running_loss_nll += logll.item()
+                loss.backward()
+            else:
+                pass
+            
+            optimizer.step()
+
+        mean_logll = running_loss_nll / (batch_idx + 1)
+
+        if algo == 'glow':
+            pass
+        elif algo == 'realnvp':
+            mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
+        else:
+            pass
+
+        print('::Mean bits per dims: {}'.format(mean_bits_per_dim))
+
+        # Before validation loop, flush the variables
+        running_loss_nll = 0. 
+        
+        # Validation loop
+        model.eval()
+        with torch.no_grad():
+            for batch_idx, data in enumerate(valid_loader):
+                x, _ = data
+                
+                if algo == 'glow':
+                    pass
+                elif algo == 'realnvp':
+                    x, logdet = logit_transform(x)
+                    x = x.to(device)
+                    logdet = logdet.to(device)
+                    logll, weight_scale = model(x)
+                    logll = (logll + logdet).mean()
+                    # For RealNVP, there is L2 regularization on scaling factors
+                    loss = -logll + scale_reg * weight_scale
+                    running_loss_nll += logll.item()
+                else:
+                    pass
+        
+        mean_logll = running_loss_nll / (batch_idx + 1)
+
+        if algo == 'glow':
+            pass
+        elif algo == 'realnvp':
+            mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
+        else:
+            pass
+
+        print('::Mean validation bits per dims: {}'.format(mean_bits_per_dim))
+
+        if mean_logll > optimal_logll:
+            early_stop = 0
+            optimal_logll = mean_logll
+        else:
+            early_stop += 1
+            if early_stop >= 100:
+                break
+    
+    print('Training finished at epoch {} with log-likelihood {}'.format(curr_epoch, optimal_logll))
 
     torch.save(model.state_dict(), output_dir + '/states/' + algo + '_state.pt')
     torch.save(optimizer.state_dict(), output_dir + '/states/' + algo + '_state_optim.pt')
 
     with torch.no_grad():
         imgs = []
-        for i in range(0, 101):
-            imgs += model.sample(temperature = i / 100).detach().cpu()
+
+        if algo == 'glow':
+            pass
+        elif algo == 'realnvp':
+            imgs, _ = logit_transform(
+                model.sample(size = 100), 
+                reverse = True
+                )
+        else:
+            pass
 
         torchvision.utils.save_image(imgs, output_dir + '/gen/img_' + algo + '.png', nrows = 10)
     return
-
-def train(
-    epochs, 
-    device, 
-    model, 
-    dataloader, 
-    optimizer, 
-    lr_lambda, 
-    output_dir, 
-    fresh,
-    saved_model, 
-    saved_optimizer
-    ):
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-
-    def step(engine, batch):
-        model.train()
-        optimizer.zero_grad()
-
-        x, _ = batch
-        x = x.to(device)
-
-        _, nll = model(x)
-        losses = compute_loss(nll)
-
-        losses["total_loss"].backward()
-
-        optimizer.step()
-
-        return losses
-
-    trainer = Engine(step)
-    checkpoint_handler = ModelCheckpoint(
-        os.path.join(output_dir, 'checkpoints'), "glow", n_saved=2, require_empty=False
-    )
-
-    trainer.add_event_handler(
-        Events.EPOCH_COMPLETED,
-        checkpoint_handler,
-        {"model": model, "optimizer": optimizer},
-    )
-
-    monitoring_metrics = ["total_loss"]
-    RunningAverage(output_transform=lambda x: x["total_loss"]).attach(
-        trainer, "total_loss"
-    )
-
-    pbar = ProgressBar()
-    pbar.attach(trainer, metric_names=monitoring_metrics)
-
-    if not fresh:
-        if saved_model is None:
-            print('Saved model file not specified. See --help/-h for more details.')
-            return
-
-        model.load_state_dict(torch.load(saved_model))
-        model.set_actnorm_init()
-
-        print('Saved model file located at {} was loaded successfully.'.format(saved_model))
-
-        if saved_optimizer:
-            optimizer.load_state_dict(torch.load(saved_optimizer))
-            print('Saved optimizer file located at {} was loaded successfully.'.format(saved_optimizer))
-        else:
-            print('Optimizer not specified, new one will be used.')
-
-    @trainer.on(Events.STARTED)
-    def init(engine):
-        model.train()
-
-    timer = Timer(average=True)
-    timer.attach(
-        trainer,
-        start=Events.EPOCH_STARTED,
-        resume=Events.ITERATION_STARTED,
-        pause=Events.ITERATION_COMPLETED,
-        step=Events.ITERATION_COMPLETED,
-    )
-
-    @trainer.on(Events.EPOCH_COMPLETED)
-    def print_times(engine):
-        pbar.log_message(
-            f"Epoch {engine.state.epoch} done. Time per batch: {timer.value():.3f}[s]"
-        )
-        timer.reset()
-
-    trainer.run(dataloader, epochs)
 
 if __name__ == "__main__":
     # Get the current directory path
@@ -277,13 +313,6 @@ if __name__ == "__main__":
         type = float,
         default = 5e-5,
         help = 'Weight decay for the model. By default 5e-5 or 0.00005.'
-    )
-
-    parser.add_argument(
-        '--warmup',
-        type = int,
-        default = 5,
-        help = 'Warmup learning rate. By default 5.'
     )
 
     parser.add_argument(

@@ -1,83 +1,77 @@
-# Stolen from https://github.com/y0ast/Glow-PyTorch/blob/master/utils.py for now
-# TODO: rewrite
+import numpy as np
 
-import math
 import torch
+import torch.nn.functional as F
+import torch.distributions as distributions
 
-def split_cross_feature(tensor, type):
-    C = tensor.size(1)
-    if type == "split":
-        return tensor[:, : C // 2, ...], tensor[:, C // 2 :, ...]
-    elif type == "cross":
-        return tensor[:, 0::2, ...], tensor[:, 1::2, ...]
+# RealNVP utility class/function - https://github.com/fmu2/realNVP
+def logit_transform(x, constraint=0.9, reverse=False):
+    '''Transforms data from [0, 1] into unbounded space.
+    Restricts data into [0.05, 0.95].
+    Calculates logit(alpha+(1-alpha)*x).
+    Args:
+        x: input tensor.
+        constraint: data constraint before logit.
+        reverse: True if transform data back to [0, 1].
+    Returns:
+        transformed tensor and log-determinant of Jacobian from the transform.
+        (if reverse=True, no log-determinant is returned.)
+    '''
+    if reverse:
+        x = 1. / (torch.exp(-x) + 1.)    # [0.05, 0.95]
+        x *= 2.             # [0.1, 1.9]
+        x -= 1.             # [-0.9, 0.9]
+        x /= constraint     # [-1, 1]
+        x += 1.             # [0, 2]
+        x /= 2.             # [0, 1]
+        return x, 0
+    else:
+        [B, C, H, W] = list(x.size())
+        
+        # dequantization
+        noise = distributions.Uniform(0., 1.).sample((B, C, H, W))
+        x = (x * 255. + noise) / 256.
+        
+        # restrict data
+        x *= 2.             # [0, 2]
+        x -= 1.             # [-1, 1]
+        x *= constraint     # [-0.9, 0.9]
+        x += 1.             # [0.1, 1.9]
+        x /= 2.             # [0.05, 0.95]
 
-def calculate_same_padding(kernel_size, stride):
-    return [((k - 1) * s + 1) // 2 for k, s in zip(kernel_size, stride)]
+        # logit data
+        logit_x = torch.log(x) - torch.log(1. - x)
 
-def uniform_binning_correction(x, n_bits=8):
-    b, c, h, w = x.size()
-    n_bins = 2 ** n_bits
-    chw = c * h * w
-    x += torch.zeros_like(x).uniform_(0, 1.0 / n_bins)
+        # log-determinant of Jacobian from the transform
+        pre_logit_scale = torch.tensor(
+            np.log(constraint) - np.log(1. - constraint))
+        log_diag_J = F.softplus(logit_x) + F.softplus(-logit_x) \
+            - F.softplus(-pre_logit_scale)
 
-    objective = -math.log(n_bins) * chw * torch.ones(b, device=x.device)
-    return x, objective
+        return logit_x, torch.sum(log_diag_J, dim=(1, 2, 3))
 
-def squeeze2d(input, factor):
-    if factor == 1:
-        return input
-
-    B, C, H, W = input.size()
-
-    assert H % factor == 0 and W % factor == 0, "H or W modulo factor is not 0"
-
-    x = input.view(B, C, H // factor, factor, W // factor, factor)
-    x = x.permute(0, 1, 3, 5, 2, 4).contiguous()
-    x = x.view(B, C * factor * factor, H // factor, W // factor)
-
-    return x
-
-def unsqueeze2d(input, factor):
-    if factor == 1:
-        return input
-
-    factor2 = factor ** 2
-
-    B, C, H, W = input.size()
-
-    assert C % (factor2) == 0, "C module factor squared is not 0"
-
-    x = input.view(B, C // factor2, factor, factor, H, W)
-    x = x.permute(0, 1, 4, 2, 5, 3).contiguous()
-    x = x.view(B, C // (factor2), H * factor, W * factor)
-
-    return x
-
-def gaussian_p(mean, logs, x):
-    """
-    lnL = -1/2 * { ln|Var| + ((X - Mu)^T)(Var^-1)(X - Mu) + kln(2*PI) }
-            k = 1 (Independent)
-            Var = logs ** 2
-    """
-    c = math.log(2 * math.pi)
-    return -0.5 * (logs * 2.0 + ((x - mean) ** 2) / torch.exp(logs * 2.0) + c)
-
-def gaussian_sample(mean, logs, temperature=1):
-    # Sample from Gaussian with temperature
-    z = torch.normal(mean, torch.exp(logs) * temperature)
-
-    return z
-
-def gaussian_likelihood(mean, logs, x):
-    p = gaussian_p(mean, logs, x)
-    return torch.sum(p, dim=[1, 2, 3])
-
-def compute_loss(nll, reduction="mean"):
-    if reduction == "mean":
-        losses = {"nll": torch.mean(nll)}
-    elif reduction == "none":
-        losses = {"nll": nll}
-
-    losses["total_loss"] = losses["nll"]
-
-    return losses
+class Hyperparameters():
+    def __init__(
+        self, 
+        base_dim, 
+        res_blocks, 
+        bottleneck, 
+        skip, 
+        weight_norm, 
+        coupling_bn
+    ):
+        """Instantiates a set of hyperparameters used for constructing layers.
+        Args:
+            base_dim: features in residual blocks of first few layers.
+            res_blocks: number of residual blocks to use.
+            bottleneck: True if use bottleneck, False otherwise.
+            skip: True if use skip architecture, False otherwise.
+            weight_norm: True if apply weight normalization, False otherwise.
+            coupling_bn: True if batchnorm coupling layer output, False otherwise.
+        """
+        self.base_dim = base_dim
+        self.res_blocks = res_blocks
+        self.bottleneck = bottleneck
+        self.skip = skip
+        self.weight_norm = weight_norm
+        self.coupling_bn = coupling_bn
