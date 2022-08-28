@@ -121,7 +121,7 @@ def main(
         return
     elif algo == 'realnvp':
         # Use normal distributions for the prior 
-        prior = distributions.Normal(torch.tensor(0.).to(device), torch.tensor(1.).to(device))
+        prior = distributions.Normal(torch.tensor(0.).to(device), torch.tensor(1.).to(device), validate_args = False)
 
         model = RealNVP(
             channels, 
