@@ -137,12 +137,32 @@ def main(
                 )
             )
     else:
-        print('Currently no implementation of StyleGAN is available. :c')
+        print('Currently no implementation of GAN is available. :c')
         return
     
+    optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
+    
+    if not fresh:
+        if saved_model is None:
+            print('Fresh mode was disabled, but the model .pt file was not specified. See -h/--help for help.')
+            return
+        try:
+            model.load_state_dict(torch.load(saved_model))
+            print()
+        except Exception:
+            print('Could not load model at {}, terminating.'.format(saved_model))
+            return
+        if optimizer is None:
+            print('Stored optimizer not specified, using a new one.')
+        else:
+            try:
+                optimizer.load_state_dict(torch.load(saved_optimizer))
+            except Exception:
+                print('Could not load optimizer at {}, using a new one.'.format(saved_optimizer))
+                pass
+
     model = model.to(device)
 
-    optimizer = optim.Adamax(model.parameters(), lr = lr, weight_decay = weight_decay)
     scale_reg = 5e-5
 
     # Define training variables
@@ -266,7 +286,7 @@ if __name__ == "__main__":
         '--algo',
         type = str,
         default = 'glow',
-        choices = ['glow', 'realnvp', 'style-gan'],
+        choices = ['glow', 'realnvp', 'gan'],
         help = 'The type of algorithm to train. Default is Glow.'
     )
 
@@ -282,7 +302,7 @@ if __name__ == "__main__":
         type = int,
         dest = 'K',
         default = 32,
-        help = 'The number of blocks per each level in a Glow model. By default is set to 32. Ignored when \'--algo\' argument is \'realnvp\' or \'style-gan\'.'
+        help = 'The number of blocks per each level in a Glow model. By default is set to 32. Ignored when \'--algo\' argument is \'realnvp\' or \'gan\'.'
     )
 
     parser.add_argument(
@@ -290,14 +310,14 @@ if __name__ == "__main__":
         type = int,
         dest = 'L',
         default = 3,
-        help = 'The number of levels in a Glow model. Ignored when \'--algo\' argument is \'realnvp\' or \'style-gan\'.'
+        help = 'The number of levels in a Glow model. Ignored when \'--algo\' argument is \'realnvp\' or \'gan\'.'
     )
 
     parser.add_argument(
         '--num-hidden',
         type = int,
         default = 512,
-        help = 'Number of hidden channels in the ActNorm layer (used for convolutions within the layer as in the Glow paper). Default is 512. Ignored when \'--algo\' argument is \'real-nvp\' or \'style-gan\'.'
+        help = 'Number of hidden channels in the ActNorm layer (used for convolutions within the layer as in the Glow paper). Default is 512. Ignored when \'--algo\' argument is \'real-nvp\' or \'gan\'.'
     )
 
     parser.add_argument(
