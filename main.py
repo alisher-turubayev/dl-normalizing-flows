@@ -148,7 +148,7 @@ def main(
             return
         try:
             model.load_state_dict(torch.load(saved_model))
-            print()
+            print('Loaded saved model.')
         except Exception:
             print('Could not load model at {}, terminating.'.format(saved_model))
             return
@@ -157,6 +157,7 @@ def main(
         else:
             try:
                 optimizer.load_state_dict(torch.load(saved_optimizer))
+                print('Loaded saved optimizer.')
             except Exception:
                 print('Could not load optimizer at {}, using a new one.'.format(saved_optimizer))
                 pass
