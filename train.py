@@ -19,6 +19,7 @@ from utils import (
 )
 
 import math
+import os
 
 def train_flow(
     algo,
@@ -34,8 +35,7 @@ def train_flow(
     num_hidden,
     output_dir,
     fresh,
-    saved_model,
-    saved_optimizer,
+    saved_path,
     lr, 
     weight_decay
     ):
@@ -106,24 +106,21 @@ def train_flow(
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
 
     if not fresh:
-        if saved_model is None:
-            print('Fresh mode was disabled, but the model .pt file was not specified. See -h/--help for help.')
+        if saved_path is None:
+            print('Fresh mode was disabled, but the path to saved model .pt file was not specified. See -h/--help for help.')
             return
         try:
-            model.load_state_dict(torch.load(saved_model))
+            model.load_state_dict(torch.load(os.path.join(saved_path, algo + '_state.pt')))
             print('Loaded saved model.')
         except Exception:
-            print('Could not load model at {}, terminating.'.format(saved_model))
+            print('Could not load model at {}, terminating.'.format(os.path.join(saved_path, algo + '_state.pt')))
             return
-        if optimizer is None:
-            print('Stored optimizer not specified, using a new one.')
-        else:
-            try:
-                optimizer.load_state_dict(torch.load(saved_optimizer))
-                print('Loaded saved optimizer.')
-            except Exception:
-                print('Could not load optimizer at {}, using a new one.'.format(saved_optimizer))
-                pass
+        try:
+            optimizer.load_state_dict(torch.load(os.path.join(saved_path, algo + '_state_optim.pt')))
+            print('Loaded saved optimizer.')
+        except Exception:
+            print('Could not load optimizer at {}, using a new one.'.format(os.path.join(saved_path, algo + '_state_optim.pt')))
+            return
 
     scale_reg = 5e-5
 
@@ -211,8 +208,8 @@ def train_flow(
     
     print('Training finished at epoch {} with log-likelihood {}'.format(curr_epoch, optimal_logll))
 
-    torch.save(model.state_dict(), output_dir + '/states/' + algo + '_state.pt')
-    torch.save(optimizer.state_dict(), output_dir + '/states/' + algo + '_state_optim.pt')
+    torch.save(model.state_dict(), os.path.join(output_dir, 'states', algo + '_state.pt'))
+    torch.save(optimizer.state_dict(), os.path.join(output_dir, 'states', algo + '_state_optim.pt'))
 
     with torch.no_grad():
         imgs = []
@@ -225,7 +222,7 @@ def train_flow(
                 reverse = True
                 )
 
-        torchvision.utils.save_image(imgs, output_dir + '/gen/img_' + algo + '.png', nrows = 10)
+        torchvision.utils.save_image(imgs, os.path.join(output_dir, 'gen', 'img_' + algo + '.png'), nrows = 10)
     return
 
 def train_dcgan(
@@ -241,7 +238,9 @@ def train_dcgan(
     ngf, 
     ndf, 
     lr,
-    weight_decay
+    weight_decay,
+    fresh,
+    saved_path
     ):
     data_transforms = transforms.Compose(
         [
@@ -290,6 +289,25 @@ def train_dcgan(
     optimizer_gen = optim.Adam(generator.parameters(), lr = lr, weight_decay = weight_decay)
     optimizer_disc = optim.Adam(discriminator.parameters(), lr = lr, weight_decay = weight_decay)
 
+    if not fresh:
+        if saved_path is None:
+            print('Fresh mode was disabled, but the model .pt file was not specified. See -h/--help for help.')
+            return
+        try:
+            generator.load_state_dict(torch.load(os.path.join(saved_path, 'generator_state.pt')))
+            discriminator.load_state_dict(torch.load(os.path.join(saved_path, 'discriminator_state.pt')))
+            print('Loaded saved model.')
+        except Exception:
+            print('Could not load model at {}, terminating.'.format(saved_path))
+            return
+        try:
+            optimizer_gen.load_state_dict(torch.load(os.path.join(saved_path, 'generator_state_optim.pt')))
+            optimizer_disc.load_state_dict(torch.load(os.path.join(saved_path, 'discriminator_state_optim.pt')))
+            print('Loaded saved optimizer.')
+        except Exception:
+            print('Could not load optimizer at {}, terminating.'.format(saved_path))
+            return
+
     curr_epoch = 0
     while curr_epoch < epochs:
         curr_epoch += 1
@@ -335,10 +353,16 @@ def train_dcgan(
         print("::Loss for discriminator after epoch: {}".format(err_disc.item()))
         print("::Loss for generator after epoch: {}".format(err_gen.item()))
     
+    # Save models 
+    torch.save(generator.state_dict(), os.path.join(output_dir, 'states', 'generator_state.pt'))
+    torch.save(discriminator.state_dict(), os.path.join(output_dir, 'states', 'discriminator_state.pt'))
+    torch.save(optimizer_gen.state_dict(), os.path.join(output_dir, 'states', 'generator_state_optim.pt'))
+    torch.save(optimizer_disc.state_dict(), os.path.join(output_dir, 'states', 'discriminator_state_optim.pt'))
+
     # Save images on fixed noise
     fixed_noise = torch.randn(100, nz, 1, 1, device=device)
 
     with torch.no_grad():
         imgs = generator(fixed_noise).detach().cpu()
-        torchvision.utils.save_image(imgs, output_dir + '/gen/img_dcgan.png', nrows = 10)
+        torchvision.utils.save_image(imgs, os.path.join(output_dir, 'gen', 'img_dcgan.png'), nrows = 10)
     return

@@ -23,8 +23,7 @@ def main(
     num_workers,
     output_dir,
     fresh,
-    saved_model,
-    saved_optimizer,
+    saved_path,
     fixed,
     K,
     L,
@@ -71,7 +70,9 @@ def main(
             ngf, 
             ndf, 
             lr,
-            weight_decay
+            weight_decay,
+            fresh,
+            saved_path
         )
     else:
         train_flow(
@@ -88,8 +89,7 @@ def main(
             num_hidden,
             output_dir,
             fresh,
-            saved_model,
-            saved_optimizer,
+            saved_path,
             lr, 
             weight_decay
         )
@@ -186,15 +186,9 @@ if __name__ == "__main__":
     )
 
     parser.add_argument(
-        '--saved-model',
+        '--saved-path',
         type = str,
-        help = 'The file that contains the previously trained model. Include the path, not just the name of the model file.'
-    )
-
-    parser.add_argument(
-        '--saved-optimizer',
-        type = str,
-        help = 'The file that contains the previously trained optimizer. Include the path, not just the name of the model optimizer.'
+        help = 'The file that contains the previously trained model/optimizer. Include the path without the file name/extension.'
     )
 
     parser.add_argument(
