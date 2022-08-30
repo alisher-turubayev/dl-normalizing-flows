@@ -22,7 +22,6 @@ import math
 import os
 
 def train_flow(
-    algo,
     epochs,
     num_workers,
     datapath,
@@ -33,6 +32,8 @@ def train_flow(
     K,
     L,
     num_hidden,
+    base_dim,
+    res_blocks,
     output_dir,
     fresh,
     saved_path,
@@ -81,26 +82,23 @@ def train_flow(
     except RuntimeError:
         device = torch.device('cpu')
 
-    if algo == 'glow':
-        print('Currently no implementation of Glow is available. :c')
-        return
-    else:
-        # Use normal distributions for the prior 
-        prior = distributions.Normal(torch.tensor(0.).to(device), torch.tensor(1.).to(device), validate_args = False)
+    
+    # Use normal distributions for the prior 
+    prior = distributions.Normal(torch.tensor(0.).to(device), torch.tensor(1.).to(device), validate_args = False)
 
-        model = RealNVP(
-            channels, 
-            image_size,
-            prior,
-            Hyperparameters(
-                base_dim = 32,
-                res_blocks = 8,
-                bottleneck = True,
-                skip = True,
-                weight_norm = True,
-                coupling_bn = True
-                )
+    model = RealNVP(
+        channels, 
+        image_size,
+        prior,
+        Hyperparameters(
+            base_dim = base_dim,
+            res_blocks = res_blocks,
+            bottleneck = True,
+            skip = True,
+            weight_norm = True,
+            coupling_bn = True
             )
+        )
     
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr = lr, weight_decay = weight_decay)
@@ -110,16 +108,16 @@ def train_flow(
             print('Fresh mode was disabled, but the path to saved model .pt file was not specified. See -h/--help for help.')
             return
         try:
-            model.load_state_dict(torch.load(os.path.join(saved_path, algo + '_state.pt')))
+            model.load_state_dict(torch.load(os.path.join(saved_path, 'realnvp_state.pt')))
             print('Loaded saved model.')
         except Exception:
-            print('Could not load model at {}, terminating.'.format(os.path.join(saved_path, algo + '_state.pt')))
+            print('Could not load model at {}, terminating.'.format(os.path.join(saved_path, 'realnvp_state.pt')))
             return
         try:
-            optimizer.load_state_dict(torch.load(os.path.join(saved_path, algo + '_state_optim.pt')))
+            optimizer.load_state_dict(torch.load(os.path.join(saved_path, 'realnvp_state_optim.pt')))
             print('Loaded saved optimizer.')
         except Exception:
-            print('Could not load optimizer at {}, using a new one.'.format(os.path.join(saved_path, algo + '_state_optim.pt')))
+            print('Could not load optimizer at {}, using a new one.'.format(os.path.join(saved_path, 'realnvp_state_optim.pt')))
             return
 
     scale_reg = 5e-5
@@ -143,28 +141,22 @@ def train_flow(
 
             x, _ = data
 
-            if algo == 'glow':
-                pass
-            elif algo == 'realnvp':
-                # log-determinant of Jacobian from the logit transform
-                x, logdet = logit_transform(x)
-                x = x.to(device)
-                logdet = logdet.to(device)
-                logll, weight_scale = model(x)
-                logll = (logll + logdet).mean()
-                # For RealNVP, there is L2 regularization on scaling factors
-                loss = -logll + scale_reg * weight_scale
-                running_loss_nll += logll.item()
-                loss.backward()
-            
+            # log-determinant of Jacobian from the logit transform
+            x, logdet = logit_transform(x)
+            x = x.to(device)
+            logdet = logdet.to(device)
+            logll, weight_scale = model(x)
+            logll = (logll + logdet).mean()
+            # For RealNVP, there is L2 regularization on scaling factors
+            loss = -logll + scale_reg * weight_scale
+            running_loss_nll += logll.item()
+            loss.backward()
+        
             optimizer.step()
 
         mean_logll = running_loss_nll / (batch_idx + 1)
 
-        if algo == 'glow':
-            pass
-        else:
-            mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
+        mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
 
         print('::Mean bits per dims: {}'.format(mean_bits_per_dim))
 
@@ -177,24 +169,18 @@ def train_flow(
             for batch_idx, data in enumerate(valid_loader):
                 x, _ = data
                 
-                if algo == 'glow':
-                    pass
-                else:
-                    x, logdet = logit_transform(x)
-                    x = x.to(device)
-                    logdet = logdet.to(device)
-                    logll, weight_scale = model(x)
-                    logll = (logll + logdet).mean()
-                    # For RealNVP, there is L2 regularization on scaling factors
-                    loss = -logll + scale_reg * weight_scale
-                    running_loss_nll += logll.item()
-        
+                x, logdet = logit_transform(x)
+                x = x.to(device)
+                logdet = logdet.to(device)
+                logll, weight_scale = model(x)
+                logll = (logll + logdet).mean()
+                # For RealNVP, there is L2 regularization on scaling factors
+                loss = -logll + scale_reg * weight_scale
+                running_loss_nll += logll.item()
+    
         mean_logll = running_loss_nll / (batch_idx + 1)
 
-        if algo == 'glow':
-            pass
-        else:
-            mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
+        mean_bits_per_dim = (-mean_logll + np.log(256.) * image_size * image_size * channels) / (image_size * image_size * channels * np.log(2.))           
 
         print('::Mean validation bits per dims: {}'.format(mean_bits_per_dim))
 
@@ -208,21 +194,16 @@ def train_flow(
     
     print('Training finished at epoch {} with log-likelihood {}'.format(curr_epoch, optimal_logll))
 
-    torch.save(model.state_dict(), os.path.join(output_dir, 'states', algo + '_state.pt'))
-    torch.save(optimizer.state_dict(), os.path.join(output_dir, 'states', algo + '_state_optim.pt'))
+    torch.save(model.state_dict(), os.path.join(output_dir, 'states', 'realnvp_state.pt'))
+    torch.save(optimizer.state_dict(), os.path.join(output_dir, 'states', 'realnvp_state_optim.pt'))
 
     with torch.no_grad():
-        imgs = []
+        imgs, _ = logit_transform(
+            model.sample(size = 100), 
+            reverse = True
+            )
 
-        if algo == 'glow':
-            pass
-        else:
-            imgs, _ = logit_transform(
-                model.sample(size = 100), 
-                reverse = True
-                )
-
-        torchvision.utils.save_image(imgs, os.path.join(output_dir, 'gen', 'img_' + algo + '.png'), nrows = 10)
+        torchvision.utils.save_image(imgs, os.path.join(output_dir, 'gen', 'img_realnvp.png'), nrows = 10)
     return
 
 def train_dcgan(
@@ -319,7 +300,11 @@ def train_dcgan(
         curr_epoch += 1
         print('Current epoch: {}'.format(curr_epoch))
 
-        for _, data in enumerate(train_loader):
+        # Average loss for generator / discriminator
+        mean_err_disc = 0.
+        mean_err_gen = 0.
+
+        for batch_idx, data in enumerate(train_loader):
             discriminator.zero_grad()
 
             real_cpu = data[0].to(device)
@@ -343,6 +328,8 @@ def train_dcgan(
             err_disc_fake.backward()
 
             err_disc = err_disc_real + err_disc_fake
+            mean_err_disc += err_disc.item()
+
             optimizer_disc.step()
 
             # Generator training step
@@ -354,10 +341,12 @@ def train_dcgan(
             err_gen = criterion(output, label)
             err_gen.backward()
 
+            mean_err_gen += err_gen.item()
+
             optimizer_gen.step()
 
-        print("::Loss for discriminator after epoch: {}".format(err_disc.item()))
-        print("::Loss for generator after epoch: {}".format(err_gen.item()))
+        print("::Mean loss for discriminator after epoch: {}".format(mean_err_disc / (batch_idx + 1)))
+        print("::Mean loss for generator after epoch: {}".format(mean_err_gen / (batch_idx + 1)))
     
     # Save models 
     torch.save(generator.state_dict(), os.path.join(output_dir, 'states', 'generator_state.pt'))

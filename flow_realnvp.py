@@ -29,19 +29,52 @@ class RealNVP(nn.Module):
         size = image_size
         dim = hps.base_dim
 
-        # architecture for CIFAR-10 (down to 16 x 16 x C)
-        # SCALE 1: 3 x 32 x 32
+        # SCALE 1: 3 x 64 x 64
         self.s1_ckbd = self.checkerboard_combo(chan, dim, size, hps)
-        self.s1_chan = self.channelwise_combo(chan*4, dim, hps)
+        self.s1_chan = self.channelwise_combo(chan*4, dim*2, hps)
         try:
             self.order_matrix_1 = self.order_matrix(chan).cuda()
         except AssertionError:
             self.order_matrix_1 = self.order_matrix(chan)
         chan *= 2
         size //= 2
+        dim *= 2
 
-        # SCALE 2: 6 x 16 x 16
-        self.s2_ckbd = self.checkerboard_combo(chan, dim, size, hps, final=True)
+        # SCALE 2: 6 x 32 x 32
+        self.s2_ckbd = self.checkerboard_combo(chan, dim, size, hps)
+        self.s2_chan = self.channelwise_combo(chan*4, dim*2, hps)
+        try:
+            self.order_matrix_2 = self.order_matrix(chan).cuda()
+        except AssertionError:
+            self.order_matrix_2 = self.order_matrix(chan)
+        chan *= 2
+        size //= 2
+        dim *= 2
+
+        # SCALE 3: 12 x 16 x 16
+        self.s3_ckbd = self.checkerboard_combo(chan, dim, size, hps)
+        self.s3_chan = self.channelwise_combo(chan*4, dim*2, hps)
+        try:
+            self.order_matrix_3 = self.order_matrix(chan).cuda()
+        except AssertionError:
+            self.order_matrix_3 = self.order_matrix(chan)
+        chan *= 2
+        size //= 2
+        dim *= 2
+
+        # SCALE 4: 24 x 8 x 8
+        self.s4_ckbd = self.checkerboard_combo(chan, dim, size, hps)
+        self.s4_chan = self.channelwise_combo(chan*4, dim*2, hps)
+        try:
+            self.order_matrix_4 = self.order_matrix(chan).cuda()
+        except AssertionError:
+            self.order_matrix_4 = self.order_matrix(chan)
+        chan *= 2
+        size //= 2
+        dim *= 2
+
+        # SCALE 5: 48 x 4 x 4
+        self.s5_ckbd = self.checkerboard_combo(chan, dim, size, hps, final=True)
 
     def checkerboard_combo(self, in_out_dim, mid_dim, size, hps, final=False):
         """Construct a combination of checkerboard coupling layers.
@@ -164,6 +197,42 @@ class RealNVP(nn.Module):
 
     def g(self, z):
         x, x_off_1 = self.factor_out(z, self.order_matrix_1)
+        x, x_off_2 = self.factor_out(x, self.order_matrix_2)
+        x, x_off_3 = self.factor_out(x, self.order_matrix_3)
+        x, x_off_4 = self.factor_out(x, self.order_matrix_4)
+
+        for i in reversed(range(len(self.s5_ckbd))):
+            x, _ = self.s5_ckbd[i](x, reverse=True)
+        
+        x = self.restore(x, x_off_4, self.order_matrix_4)
+
+        # SCALE 4: 8 x 8
+        x = self.squeeze(x)
+        for i in reversed(range(len(self.s4_chan))):
+            x, _ = self.s4_chan[i](x, reverse=True)
+        x = self.undo_squeeze(x)
+
+        for i in reversed(range(len(self.s4_ckbd))):
+            x, _ = self.s4_ckbd[i](x, reverse=True)
+
+        x = self.restore(x, x_off_3, self.order_matrix_3)
+
+        # SCALE 3: 8(16) x 8(16)
+        x = self.squeeze(x)
+        for i in reversed(range(len(self.s3_chan))):
+            x, _ = self.s3_chan[i](x, reverse=True)
+        x = self.undo_squeeze(x)
+
+        for i in reversed(range(len(self.s3_ckbd))):
+            x, _ = self.s3_ckbd[i](x, reverse=True)
+
+        x = self.restore(x, x_off_2, self.order_matrix_2)
+
+        # SCALE 2: 16(32) x 16(32)
+        x = self.squeeze(x)
+        for i in reversed(range(len(self.s2_chan))):
+            x, _ = self.s2_chan[i](x, reverse=True)
+        x = self.undo_squeeze(x)
 
         for i in reversed(range(len(self.s2_ckbd))):
             x, _ = self.s2_ckbd[i](x, reverse=True)
@@ -202,6 +271,56 @@ class RealNVP(nn.Module):
         for i in range(len(self.s2_ckbd)):
             z, inc = self.s2_ckbd[i](z)
             log_diag_J = log_diag_J + inc
+
+        z, log_diag_J = self.squeeze(z), self.squeeze(log_diag_J)
+        for i in range(len(self.s2_chan)):
+            z, inc = self.s2_chan[i](z)
+            log_diag_J = log_diag_J + inc
+        z, log_diag_J = self.undo_squeeze(z), self.undo_squeeze(log_diag_J)
+
+        z, z_off_2 = self.factor_out(z, self.order_matrix_2)
+        log_diag_J, log_diag_J_off_2 = self.factor_out(log_diag_J, self.order_matrix_2)
+
+        # SCALE 3: 8(16) x 8(16)
+        for i in range(len(self.s3_ckbd)):
+            z, inc = self.s3_ckbd[i](z)
+            log_diag_J = log_diag_J + inc
+
+        z, log_diag_J = self.squeeze(z), self.squeeze(log_diag_J)
+        for i in range(len(self.s3_chan)):
+            z, inc = self.s3_chan[i](z)
+            log_diag_J = log_diag_J + inc
+        z, log_diag_J = self.undo_squeeze(z), self.undo_squeeze(log_diag_J)
+
+        z, z_off_3 = self.factor_out(z, self.order_matrix_3)
+        log_diag_J, log_diag_J_off_3 = self.factor_out(log_diag_J, self.order_matrix_3)
+
+        # SCALE 4: 4(8) x 4(8)
+        for i in range(len(self.s4_ckbd)):
+            z, inc = self.s4_ckbd[i](z)
+            log_diag_J = log_diag_J + inc
+
+        z, log_diag_J = self.squeeze(z), self.squeeze(log_diag_J)
+        for i in range(len(self.s4_chan)):
+            z, inc = self.s4_chan[i](z)
+            log_diag_J = log_diag_J + inc
+        z, log_diag_J = self.undo_squeeze(z), self.undo_squeeze(log_diag_J)
+
+        z, z_off_4 = self.factor_out(z, self.order_matrix_4)
+        log_diag_J, log_diag_J_off_4 = self.factor_out(log_diag_J, self.order_matrix_4)
+
+        # SCALE 5: 4 x 4
+        for i in range(len(self.s5_ckbd)):
+            z, inc = self.s5_ckbd[i](z)
+            log_diag_J = log_diag_J + inc
+
+        z = self.restore(z, z_off_4, self.order_matrix_4)
+        log_diag_J = self.restore(log_diag_J, log_diag_J_off_4, self.order_matrix_4)
+
+        z = self.restore(z, z_off_3, self.order_matrix_3)
+        z = self.restore(z, z_off_2, self.order_matrix_2)
+        log_diag_J = self.restore(log_diag_J, log_diag_J_off_3, self.order_matrix_3)
+        log_diag_J = self.restore(log_diag_J, log_diag_J_off_2, self.order_matrix_2)
 
         z = self.restore(z, z_off_1, self.order_matrix_1)
         log_diag_J = self.restore(log_diag_J, log_diag_J_off_1, self.order_matrix_1)

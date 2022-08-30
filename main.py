@@ -25,9 +25,8 @@ def main(
     fresh,
     saved_path,
     fixed,
-    K,
-    L,
-    num_hidden,
+    base_dim,
+    res_blocks,
     nz,
     ngf,
     ndf
@@ -76,7 +75,6 @@ def main(
         )
     else:
         train_flow(
-            algo,
             epochs,
             num_workers,
             datapath,
@@ -84,9 +82,8 @@ def main(
             batch_size,
             image_size,
             channels,
-            K,
-            L,
-            num_hidden,
+            base_dim,
+            res_blocks,
             output_dir,
             fresh,
             saved_path,
@@ -104,9 +101,9 @@ if __name__ == "__main__":
     parser.add_argument(
         '--algo',
         type = str,
-        default = 'glow',
-        choices = ['glow', 'realnvp', 'gan'],
-        help = 'The type of algorithm to train. Default is Glow.'
+        default = 'realnvp',
+        choices = ['realnvp', 'gan'],
+        help = 'The type of algorithm to train. Default is \'realnvp\'.'
     )
 
     parser.add_argument(
@@ -197,36 +194,21 @@ if __name__ == "__main__":
         help = 'Should the seed be fixed for reproducibility - if you specify this argument, the model will be trained with a random seed. Defaults to true and is the seed is set to 999.'
     )
 
-    # Arguments for Glow:
-
-    parser.add_argument(
-        '--blocks-per-level',
-        type = int,
-        dest = 'K',
-        default = 32,
-        help = 'The number of blocks per each level in a Glow model. By default is set to 32. Ignored when \'--algo\' argument is \'realnvp\' or \'gan\'.'
-    )
-
-    parser.add_argument(
-        '--levels',
-        type = int,
-        dest = 'L',
-        default = 3,
-        help = 'The number of levels in a Glow model. Ignored when \'--algo\' argument is \'realnvp\' or \'gan\'.'
-    )
-
-    parser.add_argument(
-        '--num-hidden',
-        type = int,
-        default = 512,
-        help = 'Number of hidden channels in the ActNorm layer (used for convolutions within the layer as in the Glow paper). Default is 512. Ignored when \'--algo\' argument is \'real-nvp\' or \'gan\'.'
-    )
-
     # Arguments for RealNVP
 
-    #parser.add_argument(
-    #    '--'
-    #)
+    parser.add_argument(
+        '--base-dim',
+        type = int,
+        default = 64,
+        help = 'Features in residual blocks. Default is 64.'
+    )
+
+    parser.add_argument(
+        '--res-blocks',
+        type = int,
+        default = 8,
+        help = 'Number of residual blocks. Default is 8.'
+    )
 
     # Arguments for DRAGAN
     parser.add_argument(
