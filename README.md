@@ -17,6 +17,8 @@ This is the GitHub repository for the code part of the Deep Learning final proje
 
 [realNVP by Fangzhou Mu (@fmu2)](https://github.com/fmu2/realNVP)
 
+[DCGAN by Nathan Inkawhich @inkawhich](https://github.com/pytorch/tutorials/blob/master/beginner_source/dcgan_faces_tutorial.py)
+
 *Additional references will be added as needed*
 
 ## Results

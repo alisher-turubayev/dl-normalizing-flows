@@ -1,6 +1,7 @@
 import numpy as np
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as distributions
 
@@ -75,3 +76,12 @@ class Hyperparameters():
         self.skip = skip
         self.weight_norm = weight_norm
         self.coupling_bn = coupling_bn
+
+# DCGAN utility function - https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        nn.init.normal_(m.weight.data, 0.0, 0.02)
+    elif classname.find('BatchNorm') != -1:
+        nn.init.normal_(m.weight.data, 1.0, 0.02)
+        nn.init.constant_(m.bias.data, 0)
