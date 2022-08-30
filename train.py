@@ -277,10 +277,15 @@ def train_dcgan(
         device = torch.device('cpu')
 
     generator = Generator(ngpu, channels, nz, ngf)
-    discriminator = Discriminator(ngpu, channels, ndf)
-
     generator.apply(weights_init)
+    
+    discriminator = Discriminator(ngpu, channels, ndf)
     discriminator.apply(weights_init)
+
+    # Hotfix for CUDA issue: https://stackoverflow.com/a/59013131
+    if torch.cuda.is_available():
+        generator.cuda()
+        discriminator.cuda()
 
     criterion = nn.BCELoss()
 
@@ -320,14 +325,14 @@ def train_dcgan(
             real_cpu = data[0].to(device)
             provided_batch_size = real_cpu.size(0)
 
-            label = torch.full((provided_batch_size,), real_label, dtype=torch.float, device=device)
+            label = torch.full((provided_batch_size,), real_label, dtype = torch.float, device = device)
 
             output = discriminator(real_cpu).view(-1)
 
             err_disc_real = criterion(output, label)
             err_disc_real.backward()
 
-            noise = torch.randn(provided_batch_size, nz, 1, 1, device=device)
+            noise = torch.randn(provided_batch_size, nz, 1, 1, device = device)
             
             fake = generator(noise)
             label.fill_(fake_label)
