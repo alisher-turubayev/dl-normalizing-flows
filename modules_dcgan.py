@@ -24,32 +24,36 @@ import torch.nn as nn
 
 # Generator Code
 class Generator(nn.Module):
+    # nz is the size of the latent space vector
+    # ngf is the size of feature maps in the generator
     def __init__(self, ngpu, channels, nz, ngf):
         super(Generator, self).__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
-            # input is Z, going into a convolution
+            # Input is latent space vector z
+            # First convolution layer ([nz] -> [ngf * 8, 4, 4] )
             nn.ConvTranspose2d( nz, ngf * 8, 4, 1, 0, bias=False),
             nn.BatchNorm2d(ngf * 8),
             nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
+            # Second convolution layer ([ngf * 8, 4, 4] -> [ngf * 4, 8, 8])
             nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 4),
             nn.ReLU(True),
-            # state size. (ngf*4) x 8 x 8
+            # Third convolution layer ([ngf * 8, 4, 4] -> [ngf * 2, 16, 16])
             nn.ConvTranspose2d( ngf * 4, ngf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 2),
             nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
+            # Fourth convolution layer ([ngf * 2, 16, 16] -> [ngf, 32, 32])
             nn.ConvTranspose2d( ngf * 2, ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
+            # Fifth convolution layer ([ngf, 32, 32] -> [3, 64, 64])
             nn.ConvTranspose2d( ngf, channels, 4, 2, 1, bias=False),
+            # Use tanh function to return the data to the range of [-1, 1]
             nn.Tanh()
-            # state size. (nc) x 64 x 64
         )
-
+    # Defines the forward pass of the model
+    #   As the main contains the sequential list of layers, we can simply call main's forward function
     def forward(self, input):
         return self.main(input)
 
@@ -59,25 +63,29 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.ngpu = ngpu
         self.main = nn.Sequential(
-            # input is (nc) x 64 x 64
+            # Input is image x
+            # First convolution layer ([3, 64, 64] -> [ndf, 32, 32])
             nn.Conv2d(channels, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
+            # Second convolution layer ([ndf, 32, 32] -> [(ndf*2), 16, 16])
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
+            # Third convolution layer ([(ndf*2), 16, 16] -> [(ndf*4), 8, 8])
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            # Fourth convolution layer ([(ndf*4), 8, 8] -> [(ndf*8), 4, 4])
             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
+            # Fifth convolution ([ndf * 8, 4, 4] -> [1])
             nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
+            # Use Sigmoid activation function to output 1 or 0 (real vs fake data)
             nn.Sigmoid()
         )
 
+    # Defines the forward pass of the model
+    #   As the main contains the sequential list of layers, we can simply call main's forward function
     def forward(self, input):
         return self.main(input)

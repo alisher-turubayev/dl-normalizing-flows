@@ -32,7 +32,7 @@ Results are reported in the [final report](report/final_report.pdf) and the [cod
 
 ## Reproducing Project Results
 
-To reproduce project results, consult [code demo](demo/colab_demo.ipynb) file. 
+To reproduce project results, consult [code demo](etc/colab_demo.ipynb) file. 
 
 ### For RealNVP:
 
@@ -53,7 +53,7 @@ python3 main.py --algo realnvp --epochs 25 --res-blocks 4 --base-dim 32 --datapa
 python3 main.py --algo realnvp --epochs 25 --res-blocks 4 --base-dim 32 --datapath PATH --output-dir OUTPUT_PATH --nofresh --saved-path OUTPUT_PATH/states --fixed-seed 409
 ```
 
-For training 32 x 32 x 3 -> 16 x 16 x 6, 8 residual blocks/64 features per block, download files from commit [bab504a](bab504a2671de6ae5e3032e4d0fbb661d1ae563c), and use the following command:
+For training 32 x 32 x 3 -> 16 x 16 x 6, 8 residual blocks/64 features per block, download files from commit [bab504a](https://github.com/alisher-turubayev/dl-normalizing-flows/commit/bab504a2671de6ae5e3032e4d0fbb661d1ae563c), and use the following command:
 ```
 python3 main.py --algo realnvp --epochs 50 --image-size 32 --datapath PATH --output-dir OUTPUT_PATH --nofixed
 python3 main.py --algo realnvp --epochs 50 --image-size 32 --datapath PATH --output-dir OUTPUT_PATH --nofresh --saved-path OUTPUT_PATH/states --nofixed

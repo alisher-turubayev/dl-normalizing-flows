@@ -31,15 +31,9 @@ from modules_realnvp import (
     CheckerboardAffineCoupling
 )
 
+# RealNVP implementation by @fmu2 - https://github.com/fmu2/realNVP
 class RealNVP(nn.Module):
     def __init__(self, channels, image_size, prior, hps):
-        """Initializes a RealNVP.
-        Args:
-            channels: number of channels in the images.
-            image_size: size of each image (a square of image_size*image_size).
-            prior: prior distribution over latent space Z.
-            hps: an object of class Hyperparameters() with model hyperparameters.
-        """
         super(RealNVP, self).__init__()
         self.prior = prior
         self.channels = channels
@@ -49,7 +43,11 @@ class RealNVP(nn.Module):
         size = image_size
         dim = hps.base_dim
 
-        # SCALE 1: 3 x 64 x 64
+        # The following is the recursive (conceptually) scaling of spatial size 
+        #   Originally, two scaling operations were performed (3 x 32 x 32 -> 6 x 16 x 16 -> 12 x 4 x 4);
+        #   however, a larger input image size necessitated a change to 5 scaling operations.
+        # This approach is described in section 3.6 of the RealNVP paper
+        # Scale 1: 3 x 64 x 64
         self.s1_ckbd = self.checkerboard_combo(chan, dim, size, hps)
         self.s1_chan = self.channelwise_combo(chan*4, dim*2, hps)
         try:
@@ -60,7 +58,7 @@ class RealNVP(nn.Module):
         size //= 2
         dim *= 2
 
-        # SCALE 2: 6 x 32 x 32
+        # Scale 2: 6 x 32 x 32
         self.s2_ckbd = self.checkerboard_combo(chan, dim, size, hps)
         self.s2_chan = self.channelwise_combo(chan*4, dim*2, hps)
         try:
@@ -71,7 +69,7 @@ class RealNVP(nn.Module):
         size //= 2
         dim *= 2
 
-        # SCALE 3: 12 x 16 x 16
+        # Scale 3: 12 x 16 x 16
         self.s3_ckbd = self.checkerboard_combo(chan, dim, size, hps)
         self.s3_chan = self.channelwise_combo(chan*4, dim*2, hps)
         try:
@@ -82,7 +80,7 @@ class RealNVP(nn.Module):
         size //= 2
         dim *= 2
 
-        # SCALE 4: 24 x 8 x 8
+        # Scale 4: 24 x 8 x 8
         self.s4_ckbd = self.checkerboard_combo(chan, dim, size, hps)
         self.s4_chan = self.channelwise_combo(chan*4, dim*2, hps)
         try:
@@ -93,19 +91,11 @@ class RealNVP(nn.Module):
         size //= 2
         dim *= 2
 
-        # SCALE 5: 48 x 4 x 4
+        # Scale 5 (final): 48 x 4 x 4
         self.s5_ckbd = self.checkerboard_combo(chan, dim, size, hps, final=True)
 
+    # Generates a combination of checkerboard affine coupling layers according to section 3.2 of the RealNVP paper
     def checkerboard_combo(self, in_out_dim, mid_dim, size, hps, final=False):
-        """Construct a combination of checkerboard coupling layers.
-        Args:
-            in_out_dim: number of input and output features.
-            mid_dim: number of features in residual blocks.
-            size: height/width of features.
-            final: True if at final scale, False otherwise.
-        Returns:
-            A combination of checkerboard coupling layers.
-        """
         if final:
             return nn.ModuleList([
                 CheckerboardAffineCoupling(in_out_dim, mid_dim, size, 1., hps),
@@ -118,47 +108,34 @@ class RealNVP(nn.Module):
                 CheckerboardAffineCoupling(in_out_dim, mid_dim, size, 0., hps),
                 CheckerboardAffineCoupling(in_out_dim, mid_dim, size, 1., hps)])
         
+    # Generates a combination of channelwise affine coupling layers according to section 3.2 of the RealNVP paper
     def channelwise_combo(self, in_out_dim, mid_dim, hps):
-        """Construct a combination of channelwise coupling layers.
-        Args:
-            in_out_dim: number of input and output features.
-            mid_dim: number of features in residual blocks.
-        Returns:
-            A combination of channelwise coupling layers.
-        """
         return nn.ModuleList([
                 ChannelwiseAffineCoupling(in_out_dim, mid_dim, 0., hps),
                 ChannelwiseAffineCoupling(in_out_dim, mid_dim, 1., hps),
                 ChannelwiseAffineCoupling(in_out_dim, mid_dim, 0., hps)])
 
+    # Squeezing operation described in section 3.6 of the RealNVP paper
+    #   This operation transforms the input tensor from size C x H x W to C * 4 x H / 2 x W / 2 tensor
+    #   allowing for a trade between spatial size and number of channels
     def squeeze(self, x):
-        """Squeezes a C x H x W tensor into a 4C x H/2 x W/2 tensor.
-        (See Fig 3 in the real NVP paper.)
-        Args:
-            x: input tensor (B x C x H x W).
-        Returns:
-            the squeezed tensor (B x 4C x H/2 x W/2).
-        """
         [B, C, H, W] = list(x.size())
         x = x.reshape(B, C, H//2, 2, W//2, 2)
         x = x.permute(0, 1, 3, 5, 2, 4)
         x = x.reshape(B, C*4, H//2, W//2)
         return x
 
+    # Reverses the squeeze operation
+    #   This operation is described in section 3.6 of the RealNVP paper
     def undo_squeeze(self, x):
-        """unsqueezes a C x H x W tensor into a C/4 x 2H x 2W tensor.
-        (See Fig 3 in the real NVP paper.)
-        Args:
-            x: input tensor (B x C x H x W).
-        Returns:
-            the squeezed tensor (B x C/4 x 2H x 2W).
-        """
         [B, C, H, W] = list(x.size())
         x = x.reshape(B, C//4, 2, 2, H, W)
         x = x.permute(0, 1, 4, 2, 5, 3)
         x = x.reshape(B, C//4, H*2, W*2)
         return x
 
+    # This is a supporting function not defined in the original paper
+    # As such, the origninal comment was left as is
     def order_matrix(self, channel):
         """Constructs a matrix that defines the ordering of variables
         when downscaling/upscaling is performed.
@@ -215,6 +192,7 @@ class RealNVP(nn.Module):
         x = torch.cat((on, off), dim=1)
         return F.conv_transpose2d(x, order_matrix, stride=2, padding=0)
 
+    # Transformation function from Z to X
     def g(self, z):
         x, x_off_1 = self.factor_out(z, self.order_matrix_1)
         x, x_off_2 = self.factor_out(x, self.order_matrix_2)
@@ -226,7 +204,7 @@ class RealNVP(nn.Module):
         
         x = self.restore(x, x_off_4, self.order_matrix_4)
 
-        # SCALE 4: 8 x 8
+        # Scale 4: 8 x 8
         x = self.squeeze(x)
         for i in reversed(range(len(self.s4_chan))):
             x, _ = self.s4_chan[i](x, reverse=True)
@@ -237,7 +215,7 @@ class RealNVP(nn.Module):
 
         x = self.restore(x, x_off_3, self.order_matrix_3)
 
-        # SCALE 3: 8(16) x 8(16)
+        # Scale 3: 8(16) x 8(16)
         x = self.squeeze(x)
         for i in reversed(range(len(self.s3_chan))):
             x, _ = self.s3_chan[i](x, reverse=True)
@@ -248,7 +226,7 @@ class RealNVP(nn.Module):
 
         x = self.restore(x, x_off_2, self.order_matrix_2)
 
-        # SCALE 2: 16(32) x 16(32)
+        # Scale 2: 16(32) x 16(32)
         x = self.squeeze(x)
         for i in reversed(range(len(self.s2_chan))):
             x, _ = self.s2_chan[i](x, reverse=True)
@@ -259,7 +237,7 @@ class RealNVP(nn.Module):
 
         x = self.restore(x, x_off_1, self.order_matrix_1)
 
-        # SCALE 1: 32(64) x 32(64)
+        # Scale 1: 32(64) x 32(64)
         x = self.squeeze(x)
         for i in reversed(range(len(self.s1_chan))):
             x, _ = self.s1_chan[i](x, reverse=True)
@@ -270,10 +248,11 @@ class RealNVP(nn.Module):
 
         return x
 
+    # Transformation function X to Z
     def f(self, x):
         z, log_diag_J = x, torch.zeros_like(x)
 
-        # SCALE 1: 32(64) x 32(64)
+        # Scale 1: 32(64) x 32(64)
         for i in range(len(self.s1_ckbd)):
             z, inc = self.s1_ckbd[i](z)
             log_diag_J = log_diag_J + inc
@@ -287,7 +266,7 @@ class RealNVP(nn.Module):
         z, z_off_1 = self.factor_out(z, self.order_matrix_1)
         log_diag_J, log_diag_J_off_1 = self.factor_out(log_diag_J, self.order_matrix_1)
 
-        # SCALE 2: 16(32) x 16(32)
+        # Scale 2: 16(32) x 16(32)
         for i in range(len(self.s2_ckbd)):
             z, inc = self.s2_ckbd[i](z)
             log_diag_J = log_diag_J + inc
@@ -301,7 +280,7 @@ class RealNVP(nn.Module):
         z, z_off_2 = self.factor_out(z, self.order_matrix_2)
         log_diag_J, log_diag_J_off_2 = self.factor_out(log_diag_J, self.order_matrix_2)
 
-        # SCALE 3: 8(16) x 8(16)
+        # Scale 3: 8(16) x 8(16)
         for i in range(len(self.s3_ckbd)):
             z, inc = self.s3_ckbd[i](z)
             log_diag_J = log_diag_J + inc
@@ -315,7 +294,7 @@ class RealNVP(nn.Module):
         z, z_off_3 = self.factor_out(z, self.order_matrix_3)
         log_diag_J, log_diag_J_off_3 = self.factor_out(log_diag_J, self.order_matrix_3)
 
-        # SCALE 4: 4(8) x 4(8)
+        # Scale 4: 4(8) x 4(8)
         for i in range(len(self.s4_ckbd)):
             z, inc = self.s4_ckbd[i](z)
             log_diag_J = log_diag_J + inc
@@ -329,7 +308,7 @@ class RealNVP(nn.Module):
         z, z_off_4 = self.factor_out(z, self.order_matrix_4)
         log_diag_J, log_diag_J_off_4 = self.factor_out(log_diag_J, self.order_matrix_4)
 
-        # SCALE 5: 4 x 4
+        # Scale 5: 4 x 4
         for i in range(len(self.s5_ckbd)):
             z, inc = self.s5_ckbd[i](z)
             log_diag_J = log_diag_J + inc

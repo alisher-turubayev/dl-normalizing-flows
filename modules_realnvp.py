@@ -25,6 +25,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+# RealNVP modules by @fmu2 - https://github.com/fmu2/realNVP
+#
+# While the author (of the final project) generally follows the idea of the RealNVP, some of the aspects were not fully understood.
+# Coupled with the lack of time, the decision was made to not comment this file, instead focusing on code clean-up and final report.
+# To that end, most of the code here is a direct copy from the @fmu2 implementation, with two major differences:
+#   1. The author (of project) removed additive coupling (from the Glow paper, it seems that the model with affine coupling converges 
+#       faster and has lower negative log-likelihood)
+#   2. Due to removal of additive coupling, supporting classes ChannlewiseCoupling and CheckerboardCoupling were removed for cleaner code.
 class WeightNormConv2d(nn.Module):
     def __init__(self, in_dim, out_dim, kernel_size, stride=1, padding=0, 
         bias=True, weight_norm=True, scale=False):
