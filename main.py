@@ -1,8 +1,25 @@
-# References:
+# Utilizing Normalizing Flows for Anime Face Generation
+# 
+# Deep Learning Summer 2022 - Final Project
+# Hasso-Plattner Institute
+# 
+# Code adapted by Alisher Turubayev, M.Sc. in Digital Health Student
+# 
+# References to algorithms:
+#   https://arxiv.org/pdf/1605.08803.pdf - RealNVP
+#   https://arxiv.org/pdf/1511.06434.pdf - DCGAN
+# 
+# Code references:
 #   https://github.com/ikostrikov/pytorch-flows/,
-#   https://pytorch.org/tutorials/beginner/dcgan_faces_tutorial.html,
+#   https://github.com/pytorch/tutorials/blob/master/beginner_source/dcgan_faces_tutorial.py,
 #   https://github.com/fmu2/realNVP
-
+# 
+# All code utilitzed in this project is a property of the respective authors. Code was used in good faith
+#   for learning purposes and for the completion of the final project. The author of this notice does not 
+#   claim any rights of ownership and/or originality.
+# 
+# Code by Ilya Kostrikov (ikostrikov) and Fangzhou Mu (fmu2) is licensed under MIT License. 
+#   Code by Nathan Inkawhich (inkawich) is licensed under BSD 3-Clause License. 
 import argparse
 import torch
 
@@ -10,6 +27,11 @@ from train import train_dcgan, train_flow
 
 import os
 
+# Main function of the program. Accepts the arguments parsed with 'argparse' package and calls the
+#   respective training loop.
+# 
+# Initally, the training loops were located in this function; however, due to the significant differences in training
+#   between DCGAN and RealNVP, respective loops were moved to a separate file 'train.py'.
 def main(
     algo,
     epochs,
@@ -25,17 +47,18 @@ def main(
     fresh,
     saved_path,
     fixed,
+    fixed_seed,
     base_dim,
     res_blocks,
     nz,
     ngf,
     ndf
     ):
-    # If the fixed mode is requested, set the seed to 999 for reproducibility
+    # If the fixed mode is requested, set the seed to fixed seed (by default 999) for reproducibility
     if fixed:
-        torch.manual_seed(999)
+        torch.manual_seed(fixed_seed)
 
-    # If the output directory is not specified, make it working directory
+    # If the output directory is not specified, make it current working directory + 'outputs'
     if output_dir is None:
         output_dir = os.path.join(work_dir, 'outputs')
 
@@ -55,6 +78,7 @@ def main(
     except OSError:
         pass
 
+    # Start the respective training loop based on the requested algorithm
     if algo == 'gan':
         train_dcgan(
             epochs, 
@@ -91,13 +115,14 @@ def main(
             weight_decay
         )
 
-
 if __name__ == "__main__":
     # Get the current directory path
     work_dir = os.path.dirname(os.path.abspath(__file__))
 
+    # Create argument parser
     parser = argparse.ArgumentParser(description = 'Utilizing Normalizing Flows for Anime Face Generation - Main Program')
 
+    # Add all the required arguments
     parser.add_argument(
         '--algo',
         type = str,
@@ -191,11 +216,17 @@ if __name__ == "__main__":
     parser.add_argument(
         '--nofixed',
         action = 'store_true',
-        help = 'Should the seed be fixed for reproducibility - if you specify this argument, the model will be trained with a random seed. Defaults to true and is the seed is set to 999.'
+        help = 'Should the seed be fixed for reproducibility - if you specify this argument, the model will be trained with a random seed.'
+    )
+
+    parser.add_argument(
+        '--fixed-seed',
+        type = int,
+        default = 999,
+        help = 'Fixed seed. By default, set to 999.'
     )
 
     # Arguments for RealNVP
-
     parser.add_argument(
         '--base-dim',
         type = int,
@@ -238,6 +269,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     kwargs = vars(args)
 
+    # Determine the mode (fresh training or continuing from a saved model) and whether the seed should be fixed
     if (args.nofresh):
         kwargs['fresh'] = False
     else:
@@ -251,4 +283,5 @@ if __name__ == "__main__":
     del kwargs['nofresh']
     del kwargs['nofixed']
 
+    # Start the main method
     main(**kwargs)

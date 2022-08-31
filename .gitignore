@@ -12,7 +12,7 @@ __pycache__/
 .Python
 build/
 datasets/**
-!datasets/README.md
+!datasets/DATA_README.md
 outputs/
 develop-eggs/
 dist/

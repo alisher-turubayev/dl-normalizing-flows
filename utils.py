@@ -1,3 +1,25 @@
+# Utilizing Normalizing Flows for Anime Face Generation
+# 
+# Deep Learning Summer 2022 - Final Project
+# Hasso-Plattner Institute
+# 
+# Code adapted by Alisher Turubayev, M.Sc. in Digital Health Student
+# 
+# References to algorithms:
+#   https://arxiv.org/pdf/1605.08803.pdf - RealNVP
+#   https://arxiv.org/pdf/1511.06434.pdf - DCGAN
+# 
+# Code references:
+#   https://github.com/ikostrikov/pytorch-flows/,
+#   https://github.com/pytorch/tutorials/blob/master/beginner_source/dcgan_faces_tutorial.py,
+#   https://github.com/fmu2/realNVP
+# 
+# All code utilitzed in this project is a property of the respective authors. Code was used in good faith
+#   for learning purposes and for the completion of the final project. The author of this notice does not 
+#   claim any rights of ownership and/or originality.
+# 
+# Code by Ilya Kostrikov (ikostrikov) and Fangzhou Mu (fmu2) is licensed under MIT License. 
+#   Code by Nathan Inkawhich (inkawich) is licensed under BSD 3-Clause License. 
 import numpy as np
 
 import torch
